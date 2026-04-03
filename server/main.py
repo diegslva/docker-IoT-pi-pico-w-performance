@@ -13,7 +13,7 @@ import os
 import socket
 import time
 from contextlib import closing
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 import httpx
 from fastapi import FastAPI
@@ -101,7 +101,9 @@ async def _get_display_data() -> DisplayData:
 
     try:
         prices: dict[str, float] = await _fetch_crypto()
-        ts: str = datetime.now(tz=timezone.utc).strftime("%H:%M:%S")
+        tz_offset: int = int(os.getenv("TZ_OFFSET_HOURS", "-3"))
+        local_tz: timezone = timezone(timedelta(hours=tz_offset))
+        ts: str = datetime.now(tz=local_tz).strftime("%H:%M:%S")
         _cache = DisplayData(
             btc=prices["btc"],
             eth=prices["eth"],

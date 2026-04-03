@@ -64,7 +64,11 @@ def image_to_rgb332_dithered(img: Image.Image) -> bytes:
             eg: float = g - gq
             eb: float = b - bq
 
-            # Distribute error (Floyd-Steinberg)
+            # Distribute error (attenuated Floyd-Steinberg — less noisy)
+            strength: float = 0.5  # 0.0 = no dither, 1.0 = full dither
+            er *= strength
+            eg *= strength
+            eb *= strength
             if x + 1 < FRAME_WIDTH:
                 n = idx + 1
                 errors[n][0] += er * 7 / 16
@@ -126,38 +130,60 @@ def render_crypto_frame(
     eth_price: float,
     timestamp: str,
 ) -> bytes:
-    """Renderiza frame com cotacoes crypto — cores otimizadas pra RGB332."""
-    img: Image.Image = Image.new("RGB", (FRAME_WIDTH, FRAME_HEIGHT), color=(10, 15, 36))
+    """Renderiza frame com cotacoes crypto — area util centralizada com bordas."""
+    # Frame inteiro preto (bordas)
+    img: Image.Image = Image.new("RGB", (FRAME_WIDTH, FRAME_HEIGHT), color=(0, 0, 0))
     draw: ImageDraw.ImageDraw = ImageDraw.Draw(img)
 
-    font_title: ImageFont.FreeTypeFont | ImageFont.ImageFont = _get_font_bold(22)
-    font_label: ImageFont.FreeTypeFont | ImageFont.ImageFont = _get_font_bold(16)
-    font_price: ImageFont.FreeTypeFont | ImageFont.ImageFont = _get_font_bold(36)
-    font_footer: ImageFont.FreeTypeFont | ImageFont.ImageFont = _get_font(16)
+    # Area util centralizada
+    margin_x: int = 20
+    margin_y: int = 16
+    content_w: int = FRAME_WIDTH - 2 * margin_x   # 280
+    content_h: int = FRAME_HEIGHT - 2 * margin_y   # 208
+    cx: int = margin_x  # content x start
+    cy: int = margin_y  # content y start
 
-    # Title bar background
-    draw.rectangle([(0, 0), (319, 38)], fill=(36, 36, 85))
+    # Background da area util
+    draw.rectangle(
+        [(cx, cy), (cx + content_w - 1, cy + content_h - 1)],
+        fill=(10, 15, 36),
+    )
+
+    # Borda sutil
+    draw.rectangle(
+        [(cx, cy), (cx + content_w - 1, cy + content_h - 1)],
+        outline=(36, 36, 85),
+        width=2,
+    )
+
+    font_title: ImageFont.FreeTypeFont | ImageFont.ImageFont = _get_font_bold(20)
+    font_label: ImageFont.FreeTypeFont | ImageFont.ImageFont = _get_font_bold(14)
+    font_price: ImageFont.FreeTypeFont | ImageFont.ImageFont = _get_font_bold(32)
+    font_footer: ImageFont.FreeTypeFont | ImageFont.ImageFont = _get_font(13)
+
+    # Title bar
+    draw.rectangle([(cx + 2, cy + 2), (cx + content_w - 3, cy + 32)], fill=(36, 36, 85))
     draw.text(
-        (FRAME_WIDTH // 2, 8),
-        "CRYPTO TICKER v2",
+        (FRAME_WIDTH // 2, cy + 6),
+        "CRYPTO TICKER",
         fill=(255, 255, 85),
         font=font_title,
         anchor="mt",
     )
 
-    # BTC section
-    draw.text((15, 50), "BTC", fill=(255, 182, 0), font=font_label)
-    draw.text((15, 70), f"${btc_price:,.0f}", fill=(255, 255, 255), font=font_price)
+    # BTC
+    draw.text((cx + 12, cy + 42), "BTC", fill=(255, 182, 0), font=font_label)
+    draw.text((cx + 12, cy + 58), f"${btc_price:,.0f}", fill=(255, 255, 255), font=font_price)
 
-    # ETH section
-    draw.text((15, 125), "ETH", fill=(85, 85, 255), font=font_label)
-    draw.text((15, 145), f"${eth_price:,.0f}", fill=(255, 255, 255), font=font_price)
+    # ETH
+    draw.text((cx + 12, cy + 102), "ETH", fill=(85, 85, 255), font=font_label)
+    draw.text((cx + 12, cy + 118), f"${eth_price:,.0f}", fill=(255, 255, 255), font=font_price)
 
     # Divider
-    draw.line([(10, 195), (310, 195)], fill=(85, 85, 85), width=2)
+    draw.line([(cx + 8, cy + 162), (cx + content_w - 8, cy + 162)], fill=(85, 85, 85), width=1)
 
-    # Footer — bright colors that RGB332 renders well
-    draw.text((15, 205), f"Updated: {timestamp} UTC", fill=(0, 255, 0), font=font_footer)
-    draw.text((15, 223), "Pico W Display Server v0.1.0", fill=(85, 85, 85), font=font_footer)
+    # Footer
+    draw.text((cx + 12, cy + 170), f"Updated: {timestamp}", fill=(0, 219, 0), font=font_footer)
+    draw.text((cx + 12, cy + 188), "Pico W Display Server", fill=(73, 73, 73), font=font_footer)
 
     return image_to_rgb332_dithered(img)
