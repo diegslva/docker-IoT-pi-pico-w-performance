@@ -17,7 +17,10 @@ from datetime import datetime, timezone
 
 import httpx
 from fastapi import FastAPI
+from fastapi.responses import Response
 from pydantic import BaseModel
+
+from server.renderer import render_crypto_frame
 
 
 def check_port_available(host: str, port: int) -> bool:
@@ -119,6 +122,18 @@ async def _get_display_data() -> DisplayData:
 async def display_data() -> DisplayData:
     """JSON minimo para o Pico W renderizar no TV."""
     return await _get_display_data()
+
+
+@app.get("/api/frame")
+async def display_frame() -> Response:
+    """Frame RGB332 (76800 bytes) para escrita direta no framebuffer DVI."""
+    data: DisplayData = await _get_display_data()
+    frame: bytes = render_crypto_frame(
+        btc_price=data.btc,
+        eth_price=data.eth,
+        timestamp=data.ts,
+    )
+    return Response(content=frame, media_type="application/octet-stream")
 
 
 @app.get("/api/health")
