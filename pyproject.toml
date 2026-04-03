@@ -1,0 +1,33 @@
+[project]
+name = "docker-iot-pi-pico-w-performance"
+version = "0.1.0"
+description = "Sistema de controle de TVs via Pico W para academias fitness"
+requires-python = ">=3.14"
+authors = [
+    { name = "Diego L. Silva", email = "diegslva@users.noreply.github.com" },
+]
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.34.0",
+    "httpx>=0.28.0",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.11.0",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.25.0",
+]
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "TCH"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+pythonpath = ["src"]
