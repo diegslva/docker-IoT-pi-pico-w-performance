@@ -145,6 +145,7 @@ DISPLAY_SERVER_PORT = "$serverPort"
 FETCH_INTERVAL = "0.5"
 DEVICE_NAME = "$deviceName"
 DEVICE_POSITION = "auto"
+COLOR_DEPTH = "16"
 "@
         Set-Content -Path "${dest}settings.toml" -Value $settingsContent -NoNewline
         Write-Host "  settings.toml generated" -ForegroundColor Green

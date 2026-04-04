@@ -4,7 +4,7 @@ import logging
 
 from PIL import ImageDraw, ImageFont
 
-from server.renderer.rgb332 import FRAME_WIDTH
+from server.renderer.config import FRAME_WIDTH
 
 logger: logging.Logger = logging.getLogger("renderer.text")
 

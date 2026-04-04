@@ -1,4 +1,4 @@
-"""Pico W framebuffer client — recebe frames RGB332 do servidor e escreve direto no DVI.
+"""Pico W framebuffer client — recebe frames do servidor e escreve direto no DVI.
 
 Resiliencia:
 - Reconexao Wi-Fi automatica se cair
@@ -8,6 +8,10 @@ Resiliencia:
 Auto-discovery:
 - DEVICE_POSITION = "auto" → solicita posicao ao servidor no boot
 - DEVICE_POSITION = "3" → usa posicao fixa (backward compatible)
+
+Color depth:
+- COLOR_DEPTH = "16" → RGB565 (65K cores, 153600 bytes/frame)
+- COLOR_DEPTH = "8" → RGB332 (256 cores, 76800 bytes/frame)
 """
 
 import gc
@@ -30,7 +34,9 @@ SERVER_PORT = int(os.getenv("DISPLAY_SERVER_PORT", "8000"))
 FETCH_INTERVAL = float(os.getenv("FETCH_INTERVAL", "10"))
 DEVICE_NAME = os.getenv("DEVICE_NAME", "unnamed")
 DEVICE_POSITION_RAW = os.getenv("DEVICE_POSITION", "auto")
-FRAME_SIZE = 76800  # 320 * 240 * 1 byte (RGB332)
+COLOR_DEPTH = int(os.getenv("COLOR_DEPTH", "16"))
+BYTES_PER_PIXEL = COLOR_DEPTH // 8
+FRAME_SIZE = 320 * 240 * BYTES_PER_PIXEL
 MAX_BACKOFF = 60  # max retry interval in seconds
 MAX_CONSECUTIVE_ERRORS = 30  # hard reset after this many failures
 
@@ -47,7 +53,7 @@ fb = picodvi.Framebuffer(
     red_dp=board.D0P, red_dn=board.D0N,
     green_dp=board.D1P, green_dn=board.D1N,
     blue_dp=board.D2P, blue_dn=board.D2N,
-    color_depth=8,
+    color_depth=COLOR_DEPTH,
 )
 
 fbuf = memoryview(fb)

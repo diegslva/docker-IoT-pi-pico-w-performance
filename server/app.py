@@ -35,8 +35,8 @@ from server.observability import (
     setup_observability,
 )
 from server.providers.crypto import get_display_data
+from server.renderer.config import FRAME_HEIGHT, FRAME_WIDTH, image_to_frame
 from server.renderer.effects import EFFECT_REGISTRY, EffectContext
-from server.renderer.rgb332 import FRAME_HEIGHT, FRAME_WIDTH, image_to_rgb332
 from server.renderer.scenes import SCENE_REGISTRY, RenderContext
 from server.tz_utils import local_now
 
@@ -165,7 +165,7 @@ async def upload_image(file: UploadFile) -> dict[str, str]:
     contents: bytes = await file.read()
     img: Image.Image = Image.open(BytesIO(contents))
     img = img.convert("RGB").resize((FRAME_WIDTH, FRAME_HEIGHT))
-    frame: bytes = image_to_rgb332(img)
+    frame: bytes = image_to_frame(img)
     await effect_manager.set_custom_frame(frame)
     logger.info("Custom image uploaded: %s (%d bytes)", file.filename, len(contents))
     return {"status": "ok", "filename": file.filename or "unknown", "size": str(len(frame))}

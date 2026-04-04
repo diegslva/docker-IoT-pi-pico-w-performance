@@ -4,8 +4,8 @@ import logging
 
 from PIL import Image
 
+from server.renderer.config import FRAME_HEIGHT, FRAME_WIDTH, image_to_frame
 from server.renderer.effects.base import EffectContext, EffectRenderer
-from server.renderer.rgb332 import FRAME_HEIGHT, FRAME_WIDTH, image_to_rgb332
 from server.renderer.scenes.base import RenderContext
 from server.renderer.scenes.vitoria_sports import VitoriaSportsScene
 
@@ -21,7 +21,7 @@ class WaveEffect(EffectRenderer):
         active_position: int = ctx.tick % ctx.total_positions
         if ctx.position == active_position:
             img: Image.Image = ctx.image.copy().resize((FRAME_WIDTH, FRAME_HEIGHT))
-            return image_to_rgb332(img)
+            return image_to_frame(img)
 
         fallback_ctx: RenderContext = RenderContext(
             position=ctx.position,
