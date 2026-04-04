@@ -444,7 +444,7 @@ def render_panoramic_frame(
     tick: float = hour * 3600 + minute * 60 + second
 
     # Single offset for all text — same speed, same direction, perfectly synchronized
-    SCROLL_SPEED: float = 40.0
+    SCROLL_SPEED: float = 15.0  # px/s — at 0.5s interval = ~8px per frame (smooth)
     offset_px: int = int(tick * SCROLL_SPEED)
 
     _draw_scrolling_text(
@@ -460,12 +460,10 @@ def render_panoramic_frame(
         font=font_clock, canvas_width=W, offset_px=offset_px,
     )
 
-    msg: str = MESSAGES[frame_index % len(MESSAGES)]
-    full_msg: str = f"  ***  {msg}  ***  "
     _draw_scrolling_text(
-        draw, full_msg, y=216,
+        draw, "Bora treinar!     Vitoria Sports - ES     Bora treinar!     Vitoria Sports - ES", y=216,
         fill=(0, 255, 150), shadow=(20, 5, 0),
-        font=font_msg, canvas_width=W, offset_px=offset_px,
+        font=font_clock, canvas_width=W, offset_px=offset_px,
     )
 
     # Crop slice for this position
