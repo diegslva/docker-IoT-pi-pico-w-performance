@@ -391,15 +391,56 @@ def _render_panoramic_base(total_positions: int, hour: int = 12, minute: int = 0
     return img
 
 
+def _draw_scrolling_text(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    y: int,
+    fill: tuple[int, int, int],
+    shadow: tuple[int, int, int],
+    font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+    canvas_width: int,
+    tick: float,
+    speed: float = 40.0,
+) -> None:
+    """Desenha texto scrollando horizontalmente com wrap-around."""
+    # Measure text width
+    bbox = draw.textbbox((0, 0), text, font=font)
+    text_width: int = bbox[2] - bbox[0]
+
+    # Scroll offset: moves right to left
+    total_travel: int = canvas_width + text_width
+    offset: int = int(tick * speed) % total_travel
+
+    # Position: starts off-screen right, moves to off-screen left
+    x: int = canvas_width - offset
+
+    # Draw shadow + text
+    draw.text((x + 2, y + 2), text, fill=shadow, font=font, anchor="lt")
+    draw.text((x, y), text, fill=fill, font=font, anchor="lt")
+
+    # Wrap-around: if text exits left, draw again entering from right
+    if x + text_width < 0:
+        x2: int = x + total_travel
+        draw.text((x2 + 2, y + 2), text, fill=shadow, font=font, anchor="lt")
+        draw.text((x2, y), text, fill=fill, font=font, anchor="lt")
+    elif x > canvas_width - text_width:
+        # Also show wrapping from left side
+        x2 = x - total_travel
+        if x2 + text_width > 0:
+            draw.text((x2 + 2, y + 2), text, fill=shadow, font=font, anchor="lt")
+            draw.text((x2, y), text, fill=fill, font=font, anchor="lt")
+
+
 def render_panoramic_frame(
     position: int,
     total_positions: int,
     timestamp: str,
     hour: int = 12,
     minute: int = 0,
+    second: int = 0,
     frame_index: int = 0,
 ) -> bytes:
-    """Renderiza frame panoramico com sol animado, retorna slice da posicao."""
+    """Renderiza frame panoramico com textos scrollando, retorna slice da posicao."""
     img: Image.Image = _render_panoramic_base(total_positions, hour=hour, minute=minute)
     draw: ImageDraw.ImageDraw = ImageDraw.Draw(img)
     W: int = img.width
@@ -409,20 +450,32 @@ def render_panoramic_frame(
     font_clock: ImageFont.FreeTypeFont | ImageFont.ImageFont = _get_font_bold(20)
     font_msg: ImageFont.FreeTypeFont | ImageFont.ImageFont = _get_font_bold(18)
 
-    # Title centered across all displays
-    draw.text((W // 2 + 2, 12), "Vitoria Sports", fill=(20, 5, 0), font=font_title, anchor="mt")
-    draw.text((W // 2, 10), "Vitoria Sports", fill=(255, 220, 100), font=font_title, anchor="mt")
-    draw.text((W // 2 + 2, 48), "- ES -", fill=(20, 5, 0), font=font_sub, anchor="mt")
-    draw.text((W // 2, 46), "- ES -", fill=(200, 180, 120), font=font_sub, anchor="mt")
+    # Time-based tick for smooth scrolling (seconds since midnight)
+    tick: float = hour * 3600 + minute * 60 + second
 
-    # Clock
-    draw.text((W // 2 + 2, 195), timestamp, fill=(20, 5, 0), font=font_clock, anchor="mt")
-    draw.text((W // 2, 193), timestamp, fill=(255, 255, 200), font=font_clock, anchor="mt")
+    # Title scrolling
+    _draw_scrolling_text(
+        draw, "Vitoria Sports  -  ES", y=10,
+        fill=(255, 220, 100), shadow=(20, 5, 0),
+        font=font_title, canvas_width=W, tick=tick, speed=30.0,
+    )
 
-    # Rotating message
+    # Clock scrolling (opposite direction — negative speed via offset)
+    clock_text: str = f"{timestamp}     Vitoria Sports     {timestamp}"
+    _draw_scrolling_text(
+        draw, clock_text, y=193,
+        fill=(255, 255, 200), shadow=(20, 5, 0),
+        font=font_clock, canvas_width=W, tick=tick, speed=50.0,
+    )
+
+    # Message scrolling
     msg: str = MESSAGES[frame_index % len(MESSAGES)]
-    draw.text((W // 2 + 2, 218), msg, fill=(20, 5, 0), font=font_msg, anchor="mt")
-    draw.text((W // 2, 216), msg, fill=(0, 255, 150), font=font_msg, anchor="mt")
+    full_msg: str = f"  ***  {msg}  ***  "
+    _draw_scrolling_text(
+        draw, full_msg, y=216,
+        fill=(0, 255, 150), shadow=(20, 5, 0),
+        font=font_msg, canvas_width=W, tick=tick, speed=60.0,
+    )
 
     # Crop slice for this position
     x_start: int = position * FRAME_WIDTH

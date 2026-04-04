@@ -270,6 +270,7 @@ async def display_frame(
             timestamp=ts,
             hour=now_local.hour,
             minute=now_local.minute,
+            second=now_local.second,
             frame_index=fetch_count,
         )
     else:
