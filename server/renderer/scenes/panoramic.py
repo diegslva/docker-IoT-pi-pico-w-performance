@@ -294,6 +294,59 @@ def _render_stars_animated(arr: np.ndarray, t: float, meta: dict) -> None:
             arr[sy, sx] = [brightness, brightness, brightness]
 
 
+def _render_seagulls_animated(img: Image.Image, t: float, meta: dict) -> None:
+    """Renderiza silhuetas de gaivotas planando no ceu. Sutil e nostalgico."""
+    if meta["is_night"]:
+        return
+
+    W: int = meta["W"]
+    total_positions: int = meta["total_positions"]
+    draw: ImageDraw.ImageDraw = ImageDraw.Draw(img)
+
+    # Poucas gaivotas — 2 por display, nao uma revoada
+    rng: random.Random = random.Random(31)
+    num_birds: int = 2 * total_positions
+
+    for _ in range(num_birds):
+        base_x: int = rng.randint(0, W - 1)
+        base_y: int = rng.randint(30, 120)
+        size: int = rng.randint(4, 10)
+        speed: float = rng.uniform(6.0, 14.0)
+        glide_freq: float = rng.uniform(0.3, 0.8)
+        glide_amp: float = rng.uniform(2.0, 5.0)
+        wing_freq: float = rng.uniform(1.5, 3.0)
+
+        # Posicao com drift horizontal + oscilacao vertical (planar)
+        x: int = int(base_x + t * speed) % W
+        y: int = int(base_y + glide_amp * math.sin(t * glide_freq))
+
+        # Abertura das asas oscila suavemente (planar, nao bater)
+        wing_angle: float = 0.3 + 0.15 * math.sin(t * wing_freq)
+
+        # Silhueta: forma "V" ou "M" simples — apenas sombra
+        half_span: int = size
+        shadow_color: tuple[int, int, int] = (20, 15, 10)
+
+        # Asa esquerda (curva pra baixo)
+        points_left: list[tuple[int, int]] = []
+        for i in range(half_span + 1):
+            px: int = x - i
+            py: int = int(y + i * wing_angle)
+            points_left.append((px, py))
+
+        # Asa direita (curva pra baixo)
+        points_right: list[tuple[int, int]] = []
+        for i in range(half_span + 1):
+            px = x + i
+            py = int(y + i * wing_angle)
+            points_right.append((px, py))
+
+        if len(points_left) >= 2:
+            draw.line(points_left, fill=shadow_color, width=1)
+        if len(points_right) >= 2:
+            draw.line(points_right, fill=shadow_color, width=1)
+
+
 def _render_clouds_animated(arr: np.ndarray, t: float, meta: dict) -> None:
     """Renderiza nuvens deslizando lentamente pela direita pra esquerda."""
     if meta["is_night"]:
@@ -388,6 +441,9 @@ class PanoramicScene(SceneRenderer):
         _render_stars_animated(sky_arr, t, meta)
 
         img: Image.Image = Image.fromarray(np.clip(sky_arr, 0, 255).astype(np.uint8))
+
+        # Gaivotas (silhuetas no ceu, sobre a imagem PIL)
+        _render_seagulls_animated(img, t, meta)
 
         # Palmeiras (sobre tudo)
         _draw_palm_trees(img, meta["total_positions"], meta["is_night"])
