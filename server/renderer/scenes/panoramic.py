@@ -7,8 +7,8 @@ import random
 import numpy as np
 from PIL import Image, ImageDraw
 
+from server.renderer.config import FRAME_HEIGHT, FRAME_WIDTH, image_to_frame
 from server.renderer.fonts import get_font_bold
-from server.renderer.rgb332 import FRAME_HEIGHT, FRAME_WIDTH, image_to_rgb332
 from server.renderer.scenes.base import RenderContext, SceneRenderer
 from server.renderer.text import draw_scrolling_text
 
@@ -271,4 +271,4 @@ class PanoramicScene(SceneRenderer):
 
         x_start: int = ctx.position * FRAME_WIDTH
         x_end: int = x_start + FRAME_WIDTH
-        return image_to_rgb332(img.crop((x_start, 0, x_end, FRAME_HEIGHT)))
+        return image_to_frame(img.crop((x_start, 0, x_end, FRAME_HEIGHT)))

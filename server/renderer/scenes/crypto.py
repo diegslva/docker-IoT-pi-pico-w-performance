@@ -4,8 +4,8 @@ import logging
 
 from PIL import Image, ImageDraw
 
+from server.renderer.config import FRAME_HEIGHT, FRAME_WIDTH, image_to_frame
 from server.renderer.fonts import get_font, get_font_bold
-from server.renderer.rgb332 import FRAME_HEIGHT, FRAME_WIDTH, image_to_rgb332
 from server.renderer.scenes.base import RenderContext, SceneRenderer
 
 logger: logging.Logger = logging.getLogger("scene.crypto")
@@ -59,4 +59,4 @@ class CryptoScene(SceneRenderer):
         draw.text((cx + 12, cy + 170), f"Updated: {ctx.timestamp}", fill=GREEN, font=font_footer)
         draw.text((cx + 12, cy + 188), "Pico W Display Server", fill=TEAL, font=font_footer)
 
-        return image_to_rgb332(img)
+        return image_to_frame(img)

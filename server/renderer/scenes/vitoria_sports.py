@@ -5,8 +5,8 @@ import math
 
 from PIL import Image, ImageDraw
 
+from server.renderer.config import FRAME_HEIGHT, FRAME_WIDTH, image_to_frame
 from server.renderer.fonts import get_font, get_font_bold
-from server.renderer.rgb332 import FRAME_HEIGHT, FRAME_WIDTH, image_to_rgb332
 from server.renderer.scenes.base import RenderContext, SceneRenderer
 
 logger: logging.Logger = logging.getLogger("scene.vitoria_sports")
@@ -133,4 +133,4 @@ class VitoriaSportsScene(SceneRenderer):
         draw.text((162, 220), msg, fill=(20, 5, 0), font=font_msg, anchor="mt")
         draw.text((160, 218), msg, fill=(0, 255, 150), font=font_msg, anchor="mt")
 
-        return image_to_rgb332(img)
+        return image_to_frame(img)

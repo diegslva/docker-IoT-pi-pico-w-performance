@@ -4,8 +4,8 @@ import logging
 
 from PIL import Image
 
+from server.renderer.config import FRAME_HEIGHT, FRAME_WIDTH, image_to_frame
 from server.renderer.effects.base import EffectContext, EffectRenderer
-from server.renderer.rgb332 import FRAME_HEIGHT, FRAME_WIDTH, image_to_rgb332
 
 logger: logging.Logger = logging.getLogger("effect.wall")
 
@@ -19,4 +19,4 @@ class WallEffect(EffectRenderer):
 
         x_start: int = ctx.position * FRAME_WIDTH
         x_end: int = x_start + FRAME_WIDTH
-        return image_to_rgb332(img.crop((x_start, 0, x_end, FRAME_HEIGHT)))
+        return image_to_frame(img.crop((x_start, 0, x_end, FRAME_HEIGHT)))

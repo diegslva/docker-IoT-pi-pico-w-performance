@@ -4,8 +4,8 @@ import logging
 
 from PIL import Image
 
+from server.renderer.config import FRAME_HEIGHT, FRAME_WIDTH, image_to_frame
 from server.renderer.effects.base import EffectContext, EffectRenderer
-from server.renderer.rgb332 import FRAME_HEIGHT, FRAME_WIDTH, image_to_rgb332
 
 logger: logging.Logger = logging.getLogger("effect.scroll")
 
@@ -29,4 +29,4 @@ class ScrollEffect(EffectRenderer):
             frame.paste(img.crop((x_start, 0, img_width, FRAME_HEIGHT)), (0, 0))
             frame.paste(img.crop((0, 0, FRAME_WIDTH - first_part, FRAME_HEIGHT)), (first_part, 0))
 
-        return image_to_rgb332(frame)
+        return image_to_frame(frame)
