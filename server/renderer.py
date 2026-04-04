@@ -428,7 +428,7 @@ def render_panoramic_frame(
     font_title: ImageFont.FreeTypeFont | ImageFont.ImageFont = _get_font_bold(28)
     font_sub: ImageFont.FreeTypeFont | ImageFont.ImageFont = _get_font(18)
     font_clock: ImageFont.FreeTypeFont | ImageFont.ImageFont = _get_font_bold(20)
-    font_msg: ImageFont.FreeTypeFont | ImageFont.ImageFont = _get_font_bold(20)
+    font_msg: ImageFont.FreeTypeFont | ImageFont.ImageFont = _get_font_bold(16)
 
     # Time-based tick for smooth scrolling (seconds since midnight)
     tick: float = hour * 3600 + minute * 60 + second
@@ -451,9 +451,9 @@ def render_panoramic_frame(
     )
 
     _draw_scrolling_text(
-        draw, "Bora treinar!     Vitoria Sports - ES     Bora treinar!     Vitoria Sports - ES", y=216,
+        draw, "Bora treinar!     Vitoria Sports - ES     Bora treinar!     Vitoria Sports - ES", y=218,
         fill=(0, 255, 150), shadow=(20, 5, 0),
-        font=font_clock, canvas_width=W, offset_px=offset_px,
+        font=font_msg, canvas_width=W, offset_px=offset_px,
     )
 
     # Crop slice for this position
