@@ -316,6 +316,11 @@ effect_changes_total = Counter(
     labels=["mode"],
 )
 
+server_start_timestamp = Gauge(
+    "server_start_timestamp_seconds",
+    "Unix timestamp when the server started",
+)
+
 _ALL_METRICS: list[Counter | Gauge | Histogram] = [
     http_request_duration,
     http_requests_total,
@@ -327,6 +332,7 @@ _ALL_METRICS: list[Counter | Gauge | Histogram] = [
     crypto_cache_hits,
     crypto_cache_misses,
     effect_changes_total,
+    server_start_timestamp,
 ]
 
 

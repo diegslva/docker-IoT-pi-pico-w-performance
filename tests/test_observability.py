@@ -74,6 +74,7 @@ class TestCollectMetrics:
         assert "devices_registered" in output
         assert "fetch_errors_total" in output
         assert "effect_changes_total" in output
+        assert "server_start_timestamp_seconds" in output
 
 
 @pytest.mark.asyncio
