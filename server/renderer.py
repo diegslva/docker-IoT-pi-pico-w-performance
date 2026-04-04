@@ -453,31 +453,28 @@ def render_panoramic_frame(
     # Time-based tick for smooth scrolling (seconds since midnight)
     tick: float = hour * 3600 + minute * 60 + second
 
-    # All text scrolls in the same direction (right to left), different speeds for depth
-    SCROLL_DIR: float = 1.0  # positive = right to left
+    # All text scrolls right-to-left at the same speed
+    SCROLL_SPEED: float = 40.0
 
-    # Title scrolling (slowest — feels farther away)
     _draw_scrolling_text(
         draw, "Vitoria Sports  -  ES", y=10,
         fill=(255, 220, 100), shadow=(20, 5, 0),
-        font=font_title, canvas_width=W, tick=tick, speed=30.0 * SCROLL_DIR,
+        font=font_title, canvas_width=W, tick=tick, speed=SCROLL_SPEED,
     )
 
-    # Clock scrolling (medium speed)
     clock_text: str = f"{timestamp}     Vitoria Sports     {timestamp}"
     _draw_scrolling_text(
         draw, clock_text, y=193,
         fill=(255, 255, 200), shadow=(20, 5, 0),
-        font=font_clock, canvas_width=W, tick=tick, speed=40.0 * SCROLL_DIR,
+        font=font_clock, canvas_width=W, tick=tick, speed=SCROLL_SPEED,
     )
 
-    # Message scrolling (fastest — feels closest)
     msg: str = MESSAGES[frame_index % len(MESSAGES)]
     full_msg: str = f"  ***  {msg}  ***  "
     _draw_scrolling_text(
         draw, full_msg, y=216,
         fill=(0, 255, 150), shadow=(20, 5, 0),
-        font=font_msg, canvas_width=W, tick=tick, speed=50.0 * SCROLL_DIR,
+        font=font_msg, canvas_width=W, tick=tick, speed=SCROLL_SPEED,
     )
 
     # Crop slice for this position
