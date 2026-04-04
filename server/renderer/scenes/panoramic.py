@@ -224,15 +224,15 @@ class PanoramicScene(SceneRenderer):
         W: int = img.width
 
         font_title = get_font_bold(28)
-        font_clock = get_font_bold(20)
-        font_msg = get_font_bold(16)
+        font_info = get_font_bold(18)
 
         tick: float = ctx.hour * 3600 + ctx.minute * 60 + ctx.second
         offset_px: int = int(tick * self.SCROLL_SPEED)
 
+        # Titulo
         draw_scrolling_text(
             draw,
-            "Vitoria Sports  -  ES",
+            "Vitoria Sports - ES",
             y=10,
             fill=(255, 220, 100),
             shadow=(20, 5, 0),
@@ -241,25 +241,27 @@ class PanoramicScene(SceneRenderer):
             offset_px=offset_px,
         )
 
-        clock_text: str = f"{ctx.timestamp}     Vitoria Sports     {ctx.timestamp}"
+        # Horario
         draw_scrolling_text(
             draw,
-            clock_text,
+            ctx.timestamp,
             y=193,
             fill=(255, 255, 200),
             shadow=(20, 5, 0),
-            font=font_clock,
+            font=font_info,
             canvas_width=W,
             offset_px=offset_px,
         )
 
+        # Motivacional
+        msg: str = MESSAGES[ctx.frame_index % len(MESSAGES)]
         draw_scrolling_text(
             draw,
-            "Bora treinar!     Vitoria Sports - ES     Bora treinar!     Vitoria Sports - ES",
+            msg,
             y=218,
             fill=(0, 255, 150),
             shadow=(20, 5, 0),
-            font=font_msg,
+            font=font_info,
             canvas_width=W,
             offset_px=offset_px,
         )
