@@ -1,9 +1,13 @@
 """Efeito Video Wall — imagem panoramica dividida entre TVs."""
 
+import logging
+
 from PIL import Image
 
 from server.renderer.effects.base import EffectContext, EffectRenderer
 from server.renderer.rgb332 import FRAME_HEIGHT, FRAME_WIDTH, image_to_rgb332
+
+logger: logging.Logger = logging.getLogger("effect.wall")
 
 
 class WallEffect(EffectRenderer):

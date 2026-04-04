@@ -1,8 +1,11 @@
 """Font manager com cache — carrega fontes TrueType uma vez."""
 
+import logging
 from functools import lru_cache
 
 from PIL import ImageFont
+
+logger: logging.Logger = logging.getLogger("renderer.fonts")
 
 _FONT_PATHS: list[str] = [
     "C:/Windows/Fonts/segoeui.ttf",

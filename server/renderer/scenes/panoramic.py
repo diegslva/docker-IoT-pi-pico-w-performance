@@ -237,21 +237,36 @@ class PanoramicScene(SceneRenderer):
         motiv_str: str = "Vitoria Sports  -  Bora treinar!  -  ES"
 
         draw_scrolling_text(
-            draw, title_str, y=10,
-            fill=(255, 220, 100), shadow=(20, 5, 0),
-            font=font_title, canvas_width=W, offset_px=offset_px,
+            draw,
+            title_str,
+            y=10,
+            fill=(255, 220, 100),
+            shadow=(20, 5, 0),
+            font=font_title,
+            canvas_width=W,
+            offset_px=offset_px,
         )
 
         draw_scrolling_text(
-            draw, clock_str, y=193,
-            fill=(255, 255, 200), shadow=(20, 5, 0),
-            font=font_info, canvas_width=W, offset_px=offset_px,
+            draw,
+            clock_str,
+            y=193,
+            fill=(255, 255, 200),
+            shadow=(20, 5, 0),
+            font=font_info,
+            canvas_width=W,
+            offset_px=offset_px,
         )
 
         draw_scrolling_text(
-            draw, motiv_str, y=220,
-            fill=(0, 255, 150), shadow=(20, 5, 0),
-            font=font_motiv, canvas_width=W, offset_px=offset_px,
+            draw,
+            motiv_str,
+            y=220,
+            fill=(0, 255, 150),
+            shadow=(20, 5, 0),
+            font=font_motiv,
+            canvas_width=W,
+            offset_px=offset_px,
         )
 
         x_start: int = ctx.position * FRAME_WIDTH

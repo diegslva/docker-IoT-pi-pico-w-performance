@@ -4,6 +4,7 @@ Seguranca: so mata processos que foram iniciados por este software (PID file).
 Nunca mata processos de terceiros, mesmo que estejam na mesma porta.
 """
 
+import logging
 import os
 import socket
 import subprocess
@@ -14,7 +15,10 @@ from pathlib import Path
 
 import uvicorn
 
-from server.app import logger
+from server.observability import setup_logging
+
+setup_logging()
+logger: logging.Logger = logging.getLogger("server.main")
 
 
 def check_port_available(host: str, port: int) -> bool:
@@ -48,7 +52,7 @@ def _read_pid() -> int | None:
         return None
     try:
         return int(PID_FILE.read_text().strip())
-    except (ValueError, OSError):
+    except ValueError, OSError:
         return None
 
 
@@ -82,8 +86,10 @@ def _is_child_of(child_pid: int, parent_pid: int) -> bool:
             if "ParentProcessId=" in line:
                 ppid: int = int(line.split("=")[1].strip())
                 return ppid == parent_pid
-    except (subprocess.TimeoutExpired, ValueError, OSError):
-        pass
+    except subprocess.TimeoutExpired, ValueError, OSError:
+        logger.warning(
+            "Failed to check parent-child relationship: child=%d parent=%d", child_pid, parent_pid
+        )
     return False
 
 
@@ -101,8 +107,8 @@ def _find_pid_on_port(port: int) -> int | None:
                 parts: list[str] = line.split()
                 if len(parts) >= 5:
                     return int(parts[-1])
-    except (subprocess.TimeoutExpired, ValueError):
-        pass
+    except subprocess.TimeoutExpired, ValueError:
+        logger.warning("Failed to find PID on port %d via netstat", port)
     return None
 
 

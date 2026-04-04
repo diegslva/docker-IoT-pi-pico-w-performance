@@ -4,10 +4,11 @@ Arquitetura:
 - Scenes e effects sao plugaveis via registry
 - Estado encapsulado em DeviceRegistry e EffectManager
 - Dados externos via providers
+- Observabilidade: structured logging, correlation ID, metricas Prometheus
 """
 
 import logging
-import os
+import time
 from io import BytesIO
 
 from fastapi import FastAPI, Form, Query, UploadFile
@@ -22,24 +23,28 @@ from server.models import (
     EffectResponse,
     HealthResponse,
 )
+from server.observability import (
+    devices_online,
+    devices_registered,
+    frame_render_duration,
+    frames_rendered_total,
+    setup_observability,
+)
 from server.providers.crypto import get_display_data
 from server.renderer.effects import EFFECT_REGISTRY, EffectContext
 from server.renderer.rgb332 import FRAME_HEIGHT, FRAME_WIDTH, image_to_rgb332
 from server.renderer.scenes import SCENE_REGISTRY, RenderContext
 from server.tz_utils import local_now
 
-LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO").upper()
-
-logging.basicConfig(
-    level=getattr(logging, LOG_LEVEL, logging.INFO),
-    format="%(asctime)s %(levelname)s %(name)s %(message)s",
-)
 logger: logging.Logger = logging.getLogger("server")
 
 app = FastAPI(
     title="Pico W Display Server",
-    version="0.3.0",
+    version="0.4.0",
 )
+
+# Observabilidade: logging estruturado + correlation ID + /metrics
+setup_observability(app)
 
 # --- Encapsulated state ---
 device_registry: DeviceRegistry = DeviceRegistry()
@@ -66,8 +71,14 @@ async def display_frame(
     """
     await device_registry.register(device_id=id, name=name, ip=ip, position=pos)
 
+    # Update device gauges
+    device_list = await device_registry.list_devices()
+    devices_online.set(device_list.online)
+    devices_registered.set(device_list.total)
+
     # 1. Custom frame override
     if effect_manager.custom_frame is not None:
+        frames_rendered_total.inc(scene="custom")
         return Response(content=effect_manager.custom_frame, media_type="application/octet-stream")
 
     now = local_now()
@@ -88,7 +99,13 @@ async def display_frame(
                 timestamp=ts,
                 frame_index=fetch_count,
             )
+            start: float = time.perf_counter()
             frame: bytes = effect.render(ctx)
+            duration: float = time.perf_counter() - start
+            frame_render_duration.observe(
+                duration, scene=f"effect:{effect_manager.mode}", device_id=id
+            )
+            frames_rendered_total.inc(scene=f"effect:{effect_manager.mode}")
             return Response(content=frame, media_type="application/octet-stream")
 
     # 3. Default scene (panoramic if multi, single if alone)
@@ -106,7 +123,11 @@ async def display_frame(
         frame_index=fetch_count,
         now=now,
     )
+    start = time.perf_counter()
     frame = scene.render(ctx)
+    duration = time.perf_counter() - start
+    frame_render_duration.observe(duration, scene=scene_name, device_id=id)
+    frames_rendered_total.inc(scene=scene_name)
     return Response(content=frame, media_type="application/octet-stream")
 
 
@@ -124,6 +145,7 @@ async def upload_image(file: UploadFile) -> dict[str, str]:
     img = img.convert("RGB").resize((FRAME_WIDTH, FRAME_HEIGHT))
     frame: bytes = image_to_rgb332(img)
     await effect_manager.set_custom_frame(frame)
+    logger.info("Custom image uploaded: %s (%d bytes)", file.filename, len(contents))
     return {"status": "ok", "filename": file.filename or "unknown", "size": str(len(frame))}
 
 

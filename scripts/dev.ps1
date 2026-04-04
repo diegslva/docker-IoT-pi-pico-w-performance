@@ -12,7 +12,46 @@ function Show-Help {
     Write-Host "Commands:"
     Write-Host "  deploy    Copy pico/code.py and settings.toml to CIRCUITPY drive"
     Write-Host "  firewall  Create Windows Firewall rule for server port"
+    Write-Host "  up        Start monitoring stack (Prometheus + Grafana)"
+    Write-Host "  down      Stop monitoring stack"
+    Write-Host "  restart   Restart monitoring stack"
+    Write-Host "  nuke      Remove everything (containers + volumes)"
     Write-Host ""
+}
+
+function Remove-PicoDVContainers {
+    docker ps -a --filter "name=picodv-" -q | ForEach-Object { docker rm -f $_ }
+}
+
+function Start-Monitoring {
+    Write-Host "Starting monitoring stack..." -ForegroundColor Yellow
+    docker compose down --remove-orphans 2>$null
+    Remove-PicoDVContainers
+    docker compose up -d
+    Write-Host ""
+    Write-Host "Prometheus: http://localhost:9090" -ForegroundColor Cyan
+    Write-Host "Grafana:    http://localhost:3000 (admin/admin)" -ForegroundColor Cyan
+    Write-Host "Metrics:    http://localhost:8000/metrics" -ForegroundColor Cyan
+    Write-Host ""
+}
+
+function Stop-Monitoring {
+    Write-Host "Stopping monitoring stack..." -ForegroundColor Yellow
+    docker compose down --remove-orphans
+    Remove-PicoDVContainers
+    Write-Host "Stopped." -ForegroundColor Green
+}
+
+function Restart-Monitoring {
+    Stop-Monitoring
+    Start-Monitoring
+}
+
+function Remove-Everything {
+    Write-Host "Removing everything (containers + volumes)..." -ForegroundColor Red
+    docker compose down --remove-orphans --volumes
+    Remove-PicoDVContainers
+    Write-Host "Nuked." -ForegroundColor Green
 }
 
 function Deploy-Pico {
@@ -83,5 +122,9 @@ function Set-Firewall {
 switch ($Command) {
     "deploy"    { Deploy-Pico }
     "firewall"  { Set-Firewall }
+    "up"        { Start-Monitoring }
+    "down"      { Stop-Monitoring }
+    "restart"   { Restart-Monitoring }
+    "nuke"      { Remove-Everything }
     default     { Show-Help }
 }

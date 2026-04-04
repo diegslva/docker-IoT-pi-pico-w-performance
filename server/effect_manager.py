@@ -6,6 +6,8 @@ import time
 
 from PIL import Image
 
+from server.observability import effect_changes_total
+
 logger: logging.Logger = logging.getLogger("effect_manager")
 
 
@@ -59,6 +61,7 @@ class EffectManager:
             self._speed = speed
             self._total_positions = total_positions
             self._start_time = time.monotonic()
+            effect_changes_total.inc(mode=mode)
             logger.info("Effect set: mode=%s positions=%d speed=%d", mode, total_positions, speed)
 
     async def clear_effect(self) -> None:
@@ -67,6 +70,7 @@ class EffectManager:
             self._mode = "default"
             self._image = None
             self._start_time = 0.0
+            effect_changes_total.inc(mode="default")
             logger.info("Effect cleared")
 
     async def set_custom_frame(self, frame: bytes) -> None:
