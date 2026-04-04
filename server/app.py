@@ -54,9 +54,10 @@ effect_manager: EffectManager = EffectManager()
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """Lifecycle: inicia stream server no startup, cleanup no shutdown."""
     server_start_timestamp.set(time.time())
-    stream_srv = await start_stream_server(device_registry, effect_manager)
+    stream_srv, shutdown_event = await start_stream_server(device_registry, effect_manager)
     yield
     logger.info("Shutting down stream server...")
+    shutdown_event.set()
     stream_srv.close()
     await stream_srv.wait_closed()
     logger.info("Stream server stopped")

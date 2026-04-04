@@ -98,6 +98,7 @@ async def _handle_client(
     writer: asyncio.StreamWriter,
     device_registry: DeviceRegistry,
     effect_manager: EffectManager,
+    shutdown_event: asyncio.Event,
 ) -> None:
     """Handler para cada conexao de Pico W."""
     addr: str = writer.get_extra_info("peername", ("?", 0))[0]
@@ -139,7 +140,7 @@ async def _handle_client(
         target_interval: float = 1.0 / STREAM_FPS
         frame_count: int = 0
 
-        while True:
+        while not shutdown_event.is_set():
             total_devices: int = await device_registry.count()
 
             # Atualizar registro (last_seen + fetch_count)
@@ -179,11 +180,12 @@ async def _handle_client(
 async def start_stream_server(
     device_registry: DeviceRegistry,
     effect_manager: EffectManager,
-) -> asyncio.Server:
-    """Inicia servidor TCP streaming com retry se a porta estiver ocupada."""
+) -> tuple[asyncio.Server, asyncio.Event]:
+    """Inicia servidor TCP streaming. Retorna (server, shutdown_event)."""
+    shutdown_event: asyncio.Event = asyncio.Event()
 
     async def handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        await _handle_client(reader, writer, device_registry, effect_manager)
+        await _handle_client(reader, writer, device_registry, effect_manager, shutdown_event)
 
     for attempt in range(5):
         try:
@@ -191,7 +193,7 @@ async def start_stream_server(
                 handler, host="0.0.0.0", port=STREAM_PORT
             )
             logger.info("Stream server started on port %d (%d FPS target)", STREAM_PORT, STREAM_FPS)
-            return server
+            return server, shutdown_event
         except OSError:
             if attempt < 4:
                 logger.warning(
