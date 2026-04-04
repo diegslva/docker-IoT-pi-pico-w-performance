@@ -24,6 +24,7 @@ SERVER_IP = os.getenv("DISPLAY_SERVER_IP", "192.168.86.21")
 SERVER_PORT = int(os.getenv("DISPLAY_SERVER_PORT", "8000"))
 FETCH_INTERVAL = int(os.getenv("FETCH_INTERVAL", "10"))
 DEVICE_NAME = os.getenv("DEVICE_NAME", "unnamed")
+DEVICE_POSITION = os.getenv("DEVICE_POSITION", "0")
 FRAME_SIZE = 76800  # 320 * 240 * 1 byte (RGB332)
 MAX_BACKOFF = 60  # max retry interval in seconds
 MAX_CONSECUTIVE_ERRORS = 30  # hard reset after this many failures
@@ -51,6 +52,7 @@ gc.collect()
 print("Pico W Frame Client")
 print("ID:", DEVICE_ID)
 print("Name:", DEVICE_NAME)
+print("Position:", DEVICE_POSITION)
 print("IP:", wifi.radio.ipv4_address)
 print("Server:", SERVER_IP, ":", SERVER_PORT)
 print("RAM:", gc.mem_free())
@@ -87,6 +89,7 @@ def build_request() -> bytes:
         "?id=" + DEVICE_ID
         + "&name=" + DEVICE_NAME
         + "&ip=" + device_ip
+        + "&pos=" + DEVICE_POSITION
         + " HTTP/1.0\r\nHost: x\r\n\r\n"
     ).encode()
 

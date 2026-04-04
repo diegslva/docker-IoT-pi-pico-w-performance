@@ -17,8 +17,9 @@ from contextlib import closing
 from datetime import datetime, timedelta, timezone
 
 import httpx
-from fastapi import FastAPI, Query, UploadFile
+from fastapi import FastAPI, Form, Query, UploadFile
 from fastapi.responses import Response
+from PIL import Image
 from pydantic import BaseModel
 
 from server.renderer import (
@@ -26,7 +27,10 @@ from server.renderer import (
     FRAME_WIDTH,
     image_to_rgb332_direct,
     render_crypto_frame,
+    render_scroll_frame,
     render_vitoria_sports_frame,
+    render_wall_frame,
+    render_wave_frame,
 )
 
 
@@ -88,16 +92,30 @@ class DeviceListResponse(BaseModel):
     offline: int
 
 
+class EffectConfig(BaseModel):
+    mode: str  # "wave", "wall", "scroll"
+    speed: int = 20  # pixels per tick (scroll) or 1 for wave
+    total_positions: int = 12
+
+
+class EffectResponse(BaseModel):
+    status: str
+    mode: str
+    total_positions: int
+    speed: int
+
+
 class HealthResponse(BaseModel):
     status: str
     devices_online: int
+    active_effect: str
 
 
 # --- Device Registry ---
 _devices: dict[str, dict[str, str | int]] = {}
 
 
-def _register_device(device_id: str, name: str, ip: str) -> None:
+def _register_device(device_id: str, name: str, ip: str, position: int = 0) -> None:
     """Registra ou atualiza dispositivo no registry."""
     local_tz: timezone = timezone(timedelta(hours=TZ_OFFSET_HOURS))
     now_str: str = datetime.now(tz=local_tz).strftime("%Y-%m-%d %H:%M:%S")
@@ -106,15 +124,25 @@ def _register_device(device_id: str, name: str, ip: str) -> None:
         _devices[device_id]["last_seen"] = now_str
         _devices[device_id]["ip"] = ip
         _devices[device_id]["name"] = name
+        _devices[device_id]["position"] = position
         _devices[device_id]["fetch_count"] = int(_devices[device_id]["fetch_count"]) + 1
     else:
         _devices[device_id] = {
             "name": name,
             "ip": ip,
+            "position": position,
             "last_seen": now_str,
             "fetch_count": 1,
         }
-        logger.info("New device registered: %s (%s) from %s", name, device_id, ip)
+        logger.info("New device registered: %s (%s) pos=%d from %s", name, device_id, position, ip)
+
+
+# --- Effect State ---
+_effect_mode: str = "default"
+_effect_image: "Image.Image | None" = None
+_effect_speed: int = 20
+_effect_total_positions: int = 12
+_effect_tick: int = 0
 
 
 # --- Crypto Cache ---
@@ -180,19 +208,57 @@ async def display_frame(
     id: str = Query(default="unknown", description="Device MAC address"),
     name: str = Query(default="unnamed", description="Device friendly name"),
     ip: str = Query(default="0.0.0.0", description="Device IP address"),
+    pos: int = Query(default=0, description="Device position in display chain"),
 ) -> Response:
     """Frame RGB332 (76800 bytes) para escrita direta no framebuffer DVI."""
-    _register_device(device_id=id, name=name, ip=ip)
+    global _effect_tick
+
+    _register_device(device_id=id, name=name, ip=ip, position=pos)
 
     if _custom_frame is not None:
         return Response(content=_custom_frame, media_type="application/octet-stream")
 
-    # Default: Vitoria Sports com horario e mensagem rotativa
     local_tz: timezone = timezone(timedelta(hours=TZ_OFFSET_HOURS))
     ts: str = datetime.now(tz=local_tz).strftime("%H:%M:%S")
-    device_info: dict[str, str | int] | None = _devices.get(id)
-    fetch_count: int = int(device_info["fetch_count"]) if device_info else 0
-    frame: bytes = render_vitoria_sports_frame(timestamp=ts, frame_index=fetch_count)
+
+    # Apply active effect
+    if _effect_mode != "default" and _effect_image is not None:
+        _effect_tick += 1
+        frame: bytes
+
+        if _effect_mode == "wave":
+            frame = render_wave_frame(
+                effect_image=_effect_image,
+                position=pos,
+                tick=_effect_tick,
+                total_positions=_effect_total_positions,
+                timestamp=ts,
+            )
+        elif _effect_mode == "wall":
+            frame = render_wall_frame(
+                effect_image=_effect_image,
+                position=pos,
+                total_positions=_effect_total_positions,
+            )
+        elif _effect_mode == "scroll":
+            frame = render_scroll_frame(
+                effect_image=_effect_image,
+                position=pos,
+                tick=_effect_tick,
+                total_positions=_effect_total_positions,
+                speed=_effect_speed,
+            )
+        else:
+            device_info: dict[str, str | int] | None = _devices.get(id)
+            fetch_count: int = int(device_info["fetch_count"]) if device_info else 0
+            frame = render_vitoria_sports_frame(timestamp=ts, frame_index=fetch_count)
+
+        return Response(content=frame, media_type="application/octet-stream")
+
+    # Default: Vitoria Sports
+    device_info = _devices.get(id)
+    fetch_count = int(device_info["fetch_count"]) if device_info else 0
+    frame = render_vitoria_sports_frame(timestamp=ts, frame_index=fetch_count)
     return Response(content=frame, media_type="application/octet-stream")
 
 
@@ -236,7 +302,7 @@ async def list_devices() -> DeviceListResponse:
     )
 
 
-# --- Custom image storage (per device or global) ---
+# --- Custom image storage ---
 _custom_frame: bytes | None = None
 
 
@@ -244,7 +310,6 @@ _custom_frame: bytes | None = None
 async def upload_image(file: UploadFile) -> dict[str, str]:
     """Recebe uma imagem (PNG/JPG), converte para RGB332 e armazena como frame ativo."""
     global _custom_frame
-    from PIL import Image
     from io import BytesIO
 
     contents: bytes = await file.read()
@@ -258,13 +323,47 @@ async def upload_image(file: UploadFile) -> dict[str, str]:
 
 @app.delete("/api/image")
 async def clear_image() -> dict[str, str]:
-    """Remove imagem customizada e volta pro conteudo padrao (crypto)."""
+    """Remove imagem customizada e volta pro conteudo padrao."""
     global _custom_frame
     _custom_frame = None
     logger.info("Custom image cleared")
     return {"status": "ok"}
 
 
+# --- Effect endpoints ---
+@app.post("/api/effect")
+async def set_effect(
+    file: UploadFile,
+    mode: str = Form(default="wave", description="wave, wall, or scroll"),
+    speed: int = Form(default=20, description="Scroll speed in pixels per tick"),
+    total_positions: int = Form(default=3, description="Total displays in chain"),
+) -> EffectResponse:
+    """Configura efeito multi-display com imagem."""
+    global _effect_mode, _effect_image, _effect_speed, _effect_total_positions, _effect_tick
+    from io import BytesIO
+
+    contents: bytes = await file.read()
+    _effect_image = Image.open(BytesIO(contents)).convert("RGB")
+    _effect_mode = mode
+    _effect_speed = speed
+    _effect_total_positions = total_positions
+    _effect_tick = 0
+
+    logger.info("Effect set: mode=%s positions=%d speed=%d", mode, total_positions, speed)
+    return EffectResponse(status="ok", mode=mode, total_positions=total_positions, speed=speed)
+
+
+@app.delete("/api/effect")
+async def clear_effect() -> dict[str, str]:
+    """Remove efeito e volta pro conteudo padrao."""
+    global _effect_mode, _effect_image, _effect_tick
+    _effect_mode = "default"
+    _effect_image = None
+    _effect_tick = 0
+    logger.info("Effect cleared")
+    return {"status": "ok"}
+
+
 @app.get("/api/health")
 async def health() -> HealthResponse:
-    return HealthResponse(status="ok", devices_online=len(_devices))
+    return HealthResponse(status="ok", devices_online=len(_devices), active_effect=_effect_mode)

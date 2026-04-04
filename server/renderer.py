@@ -204,6 +204,71 @@ def render_vitoria_sports_frame(timestamp: str, frame_index: int = 0) -> bytes:
     return image_to_rgb332_direct(img)
 
 
+# --- Multi-display effects ---
+
+
+def render_wave_frame(
+    effect_image: Image.Image,
+    position: int,
+    tick: int,
+    total_positions: int,
+    timestamp: str,
+) -> bytes:
+    """Efeito Wave — imagem aparece na TV ativa, outras mostram Vitoria Sports."""
+    active_position: int = tick % total_positions
+    if position == active_position:
+        img: Image.Image = effect_image.copy().resize((FRAME_WIDTH, FRAME_HEIGHT))
+        return image_to_rgb332_direct(img)
+    return render_vitoria_sports_frame(timestamp=timestamp, frame_index=tick)
+
+
+def render_wall_frame(
+    effect_image: Image.Image,
+    position: int,
+    total_positions: int,
+) -> bytes:
+    """Efeito Video Wall — cada TV mostra um pedaco da imagem panoramica."""
+    wall_width: int = FRAME_WIDTH * total_positions
+    img: Image.Image = effect_image.copy().resize((wall_width, FRAME_HEIGHT))
+
+    # Crop the slice for this position
+    x_start: int = position * FRAME_WIDTH
+    x_end: int = x_start + FRAME_WIDTH
+    slice_img: Image.Image = img.crop((x_start, 0, x_end, FRAME_HEIGHT))
+    return image_to_rgb332_direct(slice_img)
+
+
+def render_scroll_frame(
+    effect_image: Image.Image,
+    position: int,
+    tick: int,
+    total_positions: int,
+    speed: int,
+) -> bytes:
+    """Efeito Scroll — imagem larga desloca continuamente por todas as TVs."""
+    wall_width: int = FRAME_WIDTH * total_positions
+    img: Image.Image = effect_image.copy().resize((wall_width, FRAME_HEIGHT))
+    img_width: int = img.width
+
+    # Offset based on tick and speed
+    offset: int = (tick * speed) % img_width
+
+    # This device's window
+    x_start: int = (offset + position * FRAME_WIDTH) % img_width
+
+    # Create frame by wrapping around
+    frame: Image.Image = Image.new("RGB", (FRAME_WIDTH, FRAME_HEIGHT))
+    if x_start + FRAME_WIDTH <= img_width:
+        frame.paste(img.crop((x_start, 0, x_start + FRAME_WIDTH, FRAME_HEIGHT)), (0, 0))
+    else:
+        # Wrap around
+        first_part: int = img_width - x_start
+        frame.paste(img.crop((x_start, 0, img_width, FRAME_HEIGHT)), (0, 0))
+        frame.paste(img.crop((0, 0, FRAME_WIDTH - first_part, FRAME_HEIGHT)), (first_part, 0))
+
+    return image_to_rgb332_direct(frame)
+
+
 def render_crypto_frame(
     btc_price: float,
     eth_price: float,
