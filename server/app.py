@@ -7,6 +7,7 @@ Arquitetura:
 - Observabilidade: structured logging, correlation ID, metricas Prometheus
 """
 
+import asyncio
 import logging
 import time
 from collections.abc import AsyncGenerator
@@ -56,8 +57,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     server_start_timestamp.set(time.time())
     stream_srv = await start_stream_server(device_registry, effect_manager)
     yield
+    logger.info("Shutting down stream server...")
     stream_srv.close()
+    # Cancelar todas as tasks de streaming ativas
+    for task in asyncio.all_tasks():
+        if task.get_name().startswith("Task") and not task.done():
+            task.cancel()
     await stream_srv.wait_closed()
+    logger.info("Stream server stopped")
 
 
 app = FastAPI(

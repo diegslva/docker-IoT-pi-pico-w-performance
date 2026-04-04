@@ -135,13 +135,13 @@ def discover_position() -> str:
 
 
 # --- Resolve position ---
-if DEVICE_POSITION_RAW.lower() in ("auto", ""):
-    print("Auto-discovery mode, requesting position from server...")
-    if ensure_wifi():
-        DEVICE_POSITION = discover_position()
-    else:
-        DEVICE_POSITION = "0"
-        print("No Wi-Fi for discovery, using fallback position 0")
+AUTO_MODE = DEVICE_POSITION_RAW.lower() in ("auto", "")
+if AUTO_MODE:
+    # Posicao sera atribuida pelo stream server no handshake (pos=-1)
+    # Fallback HTTP discovery so se streaming falhar
+    DEVICE_POSITION = "-1"
+    print("Auto-discovery mode: stream server will assign position")
+    ensure_wifi()
 else:
     DEVICE_POSITION = DEVICE_POSITION_RAW
 
@@ -199,7 +199,13 @@ def stream_frames() -> int:
         resp = json.loads(resp_line)
         frame_size = resp.get("frame_size", FRAME_SIZE)
 
-        print("Stream connected | pos:", resp.get("position"), "| frame:", frame_size)
+        assigned_pos = resp.get("position", 0)
+        print("Stream connected | pos:", assigned_pos, "| frame:", frame_size)
+
+        # Atualizar posicao global se em modo auto
+        global DEVICE_POSITION
+        if AUTO_MODE:
+            DEVICE_POSITION = str(assigned_pos)
 
         # Loop de streaming — receber frames direto no framebuffer
         while True:
