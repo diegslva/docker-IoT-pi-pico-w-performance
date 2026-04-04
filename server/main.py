@@ -78,6 +78,8 @@ class DeviceInfo(BaseModel):
 class DeviceListResponse(BaseModel):
     devices: list[DeviceInfo]
     total: int
+    online: int
+    offline: int
 
 
 class HealthResponse(BaseModel):
@@ -188,20 +190,44 @@ async def display_frame(
     return Response(content=frame, media_type="application/octet-stream")
 
 
+DEVICE_OFFLINE_THRESHOLD: int = int(os.getenv("DEVICE_OFFLINE_SECONDS", "60"))
+
+
 @app.get("/api/devices")
 async def list_devices() -> DeviceListResponse:
-    """Lista todos os Pico W's registrados."""
-    devices: list[DeviceInfo] = [
-        DeviceInfo(
-            device_id=did,
-            name=str(info["name"]),
-            ip=str(info["ip"]),
-            last_seen=str(info["last_seen"]),
-            fetch_count=int(info["fetch_count"]),
+    """Lista todos os Pico W's registrados com status online/offline."""
+    local_tz: timezone = timezone(timedelta(hours=TZ_OFFSET_HOURS))
+    now: datetime = datetime.now(tz=local_tz)
+    online_count: int = 0
+
+    devices: list[DeviceInfo] = []
+    for did, info in _devices.items():
+        try:
+            last: datetime = datetime.strptime(str(info["last_seen"]), "%Y-%m-%d %H:%M:%S")
+            last = last.replace(tzinfo=local_tz)
+            is_online: bool = (now - last).total_seconds() < DEVICE_OFFLINE_THRESHOLD
+        except (ValueError, TypeError):
+            is_online = False
+
+        if is_online:
+            online_count += 1
+
+        devices.append(
+            DeviceInfo(
+                device_id=did,
+                name=str(info["name"]),
+                ip=str(info["ip"]),
+                last_seen=str(info["last_seen"]),
+                fetch_count=int(info["fetch_count"]),
+            )
         )
-        for did, info in _devices.items()
-    ]
-    return DeviceListResponse(devices=devices, total=len(devices))
+
+    return DeviceListResponse(
+        devices=devices,
+        total=len(devices),
+        online=online_count,
+        offline=len(devices) - online_count,
+    )
 
 
 # --- Custom image storage (per device or global) ---

@@ -1,4 +1,10 @@
-"""Pico W framebuffer client — recebe frames RGB332 do servidor e escreve direto no DVI."""
+"""Pico W framebuffer client — recebe frames RGB332 do servidor e escreve direto no DVI.
+
+Resiliencia:
+- Reconexao Wi-Fi automatica se cair
+- Retry com exponential backoff se servidor nao responder
+- Watchdog via supervisor loop
+"""
 
 import gc
 import os
@@ -6,8 +12,10 @@ import time
 
 import board
 import displayio
+import microcontroller
 import picodvi
 import socketpool
+import supervisor
 import wifi
 
 gc.collect()
@@ -17,11 +25,12 @@ SERVER_PORT = int(os.getenv("DISPLAY_SERVER_PORT", "8000"))
 FETCH_INTERVAL = int(os.getenv("FETCH_INTERVAL", "10"))
 DEVICE_NAME = os.getenv("DEVICE_NAME", "unnamed")
 FRAME_SIZE = 76800  # 320 * 240 * 1 byte (RGB332)
+MAX_BACKOFF = 60  # max retry interval in seconds
+MAX_CONSECUTIVE_ERRORS = 30  # hard reset after this many failures
 
 # --- Device identity ---
 mac_bytes = wifi.radio.mac_address
 DEVICE_ID = ":".join(f"{b:02x}" for b in mac_bytes)
-DEVICE_IP = str(wifi.radio.ipv4_address)
 
 # --- DVI Framebuffer ---
 displayio.release_displays()
@@ -36,24 +45,50 @@ fb = picodvi.Framebuffer(
 )
 
 fbuf = memoryview(fb)
-
 pool = socketpool.SocketPool(wifi.radio)
 gc.collect()
+
 print("Pico W Frame Client")
 print("ID:", DEVICE_ID)
 print("Name:", DEVICE_NAME)
-print("IP:", DEVICE_IP)
+print("IP:", wifi.radio.ipv4_address)
 print("Server:", SERVER_IP, ":", SERVER_PORT)
 print("RAM:", gc.mem_free())
 
-# Build request line once (save RAM on each fetch)
-REQ_LINE = (
-    "GET /api/frame"
-    "?id=" + DEVICE_ID
-    + "&name=" + DEVICE_NAME
-    + "&ip=" + DEVICE_IP
-    + " HTTP/1.0\r\nHost: x\r\n\r\n"
-).encode()
+
+def ensure_wifi() -> bool:
+    """Garante que o Wi-Fi esta conectado. Retorna True se OK."""
+    if wifi.radio.connected:
+        return True
+
+    print("Wi-Fi disconnected, reconnecting...")
+    for attempt in range(5):
+        try:
+            ssid = os.getenv("CIRCUITPY_WIFI_SSID", "")
+            password = os.getenv("CIRCUITPY_WIFI_PASSWORD", "")
+            if ssid:
+                wifi.radio.connect(ssid, password)
+            if wifi.radio.connected:
+                print("Wi-Fi reconnected | IP:", wifi.radio.ipv4_address)
+                return True
+        except Exception as e:
+            print("Wi-Fi attempt", attempt + 1, "failed:", e)
+        time.sleep(2)
+
+    print("Wi-Fi reconnection failed after 5 attempts")
+    return False
+
+
+def build_request() -> bytes:
+    """Constroi request HTTP com identidade do device."""
+    device_ip = str(wifi.radio.ipv4_address)
+    return (
+        "GET /api/frame"
+        "?id=" + DEVICE_ID
+        + "&name=" + DEVICE_NAME
+        + "&ip=" + device_ip
+        + " HTTP/1.0\r\nHost: x\r\n\r\n"
+    ).encode()
 
 
 def fetch_frame() -> bool:
@@ -63,7 +98,7 @@ def fetch_frame() -> bool:
     s.setblocking(True)
     try:
         s.connect((SERVER_IP, SERVER_PORT))
-        s.send(REQ_LINE)
+        s.send(build_request())
 
         # Read HTTP headers
         header = b""
@@ -88,15 +123,43 @@ def fetch_frame() -> bool:
         s.close()
 
 
+# --- Main loop with resilience ---
+error_count: int = 0
+backoff: int = FETCH_INTERVAL
+
 while True:
     try:
+        if not ensure_wifi():
+            print("No Wi-Fi, retrying in", backoff, "s")
+            time.sleep(backoff)
+            backoff = min(backoff * 2, MAX_BACKOFF)
+            error_count += 1
+            if error_count >= MAX_CONSECUTIVE_ERRORS:
+                print("Too many errors, hard reset")
+                microcontroller.reset()
+            continue
+
         ok = fetch_frame()
         gc.collect()
+
         if ok:
             print("Frame OK | RAM:", gc.mem_free())
+            error_count = 0
+            backoff = FETCH_INTERVAL
         else:
             print("Frame incomplete")
+            error_count += 1
+
     except Exception as e:
         print("Err:", e)
-    gc.collect()
-    time.sleep(FETCH_INTERVAL)
+        error_count += 1
+        gc.collect()
+
+    if error_count > 0:
+        backoff = min(FETCH_INTERVAL * (2 ** min(error_count, 4)), MAX_BACKOFF)
+        print("Backoff:", backoff, "s | Errors:", error_count)
+        if error_count >= MAX_CONSECUTIVE_ERRORS:
+            print("Too many errors, hard reset")
+            microcontroller.reset()
+
+    time.sleep(backoff if error_count > 0 else FETCH_INTERVAL)
