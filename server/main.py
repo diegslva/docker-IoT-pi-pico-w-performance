@@ -17,11 +17,11 @@ from contextlib import closing
 from datetime import datetime, timedelta, timezone
 
 import httpx
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-from server.renderer import render_crypto_frame
+from server.renderer import image_to_rgb332_direct, render_crypto_frame, FRAME_WIDTH, FRAME_HEIGHT
 
 
 def check_port_available(host: str, port: int) -> bool:
@@ -176,6 +176,9 @@ async def display_frame(
     """Frame RGB332 (76800 bytes) para escrita direta no framebuffer DVI."""
     _register_device(device_id=id, name=name, ip=ip)
 
+    if _custom_frame is not None:
+        return Response(content=_custom_frame, media_type="application/octet-stream")
+
     data: DisplayData = await _get_display_data()
     frame: bytes = render_crypto_frame(
         btc_price=data.btc,
@@ -199,6 +202,35 @@ async def list_devices() -> DeviceListResponse:
         for did, info in _devices.items()
     ]
     return DeviceListResponse(devices=devices, total=len(devices))
+
+
+# --- Custom image storage (per device or global) ---
+_custom_frame: bytes | None = None
+
+
+@app.post("/api/image")
+async def upload_image(file: UploadFile) -> dict[str, str]:
+    """Recebe uma imagem (PNG/JPG), converte para RGB332 e armazena como frame ativo."""
+    global _custom_frame
+    from PIL import Image
+    from io import BytesIO
+
+    contents: bytes = await file.read()
+    img: Image.Image = Image.open(BytesIO(contents))
+    img = img.convert("RGB").resize((FRAME_WIDTH, FRAME_HEIGHT))
+    _custom_frame = image_to_rgb332_direct(img)
+
+    logger.info("Custom image uploaded: %s (%dx%d)", file.filename, img.width, img.height)
+    return {"status": "ok", "filename": file.filename or "unknown", "size": str(len(_custom_frame))}
+
+
+@app.delete("/api/image")
+async def clear_image() -> dict[str, str]:
+    """Remove imagem customizada e volta pro conteudo padrao (crypto)."""
+    global _custom_frame
+    _custom_frame = None
+    logger.info("Custom image cleared")
+    return {"status": "ok"}
 
 
 @app.get("/api/health")
