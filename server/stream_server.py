@@ -180,11 +180,26 @@ async def start_stream_server(
     device_registry: DeviceRegistry,
     effect_manager: EffectManager,
 ) -> asyncio.Server:
-    """Inicia servidor TCP streaming."""
+    """Inicia servidor TCP streaming com retry se a porta estiver ocupada."""
 
     async def handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         await _handle_client(reader, writer, device_registry, effect_manager)
 
-    server: asyncio.Server = await asyncio.start_server(handler, host="0.0.0.0", port=STREAM_PORT)
-    logger.info("Stream server started on port %d (%d FPS target)", STREAM_PORT, STREAM_FPS)
-    return server
+    for attempt in range(5):
+        try:
+            server: asyncio.Server = await asyncio.start_server(
+                handler, host="0.0.0.0", port=STREAM_PORT
+            )
+            logger.info("Stream server started on port %d (%d FPS target)", STREAM_PORT, STREAM_FPS)
+            return server
+        except OSError:
+            if attempt < 4:
+                logger.warning(
+                    "Port %d in use, retrying in 2s (attempt %d/5)", STREAM_PORT, attempt + 1
+                )
+                await asyncio.sleep(2)
+            else:
+                logger.error(
+                    "Failed to bind stream server on port %d after 5 attempts", STREAM_PORT
+                )
+                raise
