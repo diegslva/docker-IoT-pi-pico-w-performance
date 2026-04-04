@@ -1,13 +1,14 @@
 """Configuracao de color mode — despacha entre RGB332 e RGB565.
 
-COLOR_MODE e lido do env. Default: "rgb565" (65K cores).
+COLOR_MODE e lido do env. Default: "rgb332" (compativel com Pico W 264KB RAM).
+Trocar para "rgb565" quando usar Pico 2 W (520KB RAM).
 Todos os scenes/effects importam daqui: uma unica variavel muda o formato inteiro.
 """
 
 import os
 from collections.abc import Callable
 
-COLOR_MODE: str = os.getenv("COLOR_MODE", "rgb565")
+COLOR_MODE: str = os.getenv("COLOR_MODE", "rgb332")
 
 if COLOR_MODE == "rgb332":
     from server.renderer.rgb332 import FRAME_HEIGHT, FRAME_SIZE, FRAME_WIDTH
