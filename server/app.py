@@ -28,6 +28,7 @@ from server.observability import (
     devices_registered,
     frame_render_duration,
     frames_rendered_total,
+    server_start_timestamp,
     setup_observability,
 )
 from server.providers.crypto import get_display_data
@@ -45,6 +46,7 @@ app = FastAPI(
 
 # Observabilidade: logging estruturado + correlation ID + /metrics
 setup_observability(app)
+server_start_timestamp.set(time.time())
 
 # --- Encapsulated state ---
 device_registry: DeviceRegistry = DeviceRegistry()
