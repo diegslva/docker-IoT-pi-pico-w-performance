@@ -175,6 +175,7 @@ def stream_frames() -> int:
 
     Retorna numero de frames recebidos antes de desconectar.
     """
+    global DEVICE_POSITION
     gc.collect()
     s = pool.socket(pool.AF_INET, pool.SOCK_STREAM)
     s.setblocking(True)
@@ -202,8 +203,7 @@ def stream_frames() -> int:
         assigned_pos = resp.get("position", 0)
         print("Stream connected | pos:", assigned_pos, "| frame:", frame_size)
 
-        # Atualizar posicao global se em modo auto
-        global DEVICE_POSITION
+        # Atualizar posicao se em modo auto
         if AUTO_MODE:
             DEVICE_POSITION = str(assigned_pos)
 

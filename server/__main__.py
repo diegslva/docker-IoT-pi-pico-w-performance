@@ -16,7 +16,6 @@ import json
 import logging
 import msvcrt
 import os
-import signal
 import socket
 import subprocess
 import sys
@@ -268,11 +267,18 @@ def _free_stale_port(port: int) -> None:
         )
 
 
+_cleaned_up: bool = False
+
+
 def _cleanup(lock_fd: int) -> None:
-    """Cleanup gracioso: PID file + lock."""
+    """Cleanup gracioso: PID file + lock. Idempotente — so executa 1x."""
+    global _cleaned_up
+    if _cleaned_up:
+        return
+    _cleaned_up = True
     _remove_pid()
     _release_lock(lock_fd)
-    logger.info("Lock released, PID file removed — shutdown complete")
+    logger.info("Shutdown complete — PID file removed, lock released")
 
 
 def main() -> None:
@@ -294,17 +300,8 @@ def main() -> None:
 
     _write_pid()
 
-    # Cleanup em qualquer cenario de saida (Ctrl+C, kill, crash, atexit)
+    # Safety net: atexit como ultimo recurso
     atexit.register(_cleanup, lock_fd)
-
-    def _signal_handler(signum: int, _frame: object) -> None:
-        signame: str = signal.Signals(signum).name
-        logger.info("Received %s — shutting down gracefully", signame)
-        _cleanup(lock_fd)
-        sys.exit(0)
-
-    signal.signal(signal.SIGINT, _signal_handler)
-    signal.signal(signal.SIGTERM, _signal_handler)
 
     try:
         uvicorn.run(
