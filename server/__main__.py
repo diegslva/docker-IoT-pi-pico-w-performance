@@ -5,14 +5,27 @@ Nunca mata processos de terceiros, mesmo que estejam na mesma porta.
 """
 
 import os
+import socket
 import subprocess
 import sys
 import time
+from contextlib import closing
 from pathlib import Path
 
 import uvicorn
 
-from server.main import check_port_available, logger
+from server.app import logger
+
+
+def check_port_available(host: str, port: int) -> bool:
+    """Verifica se a porta esta disponivel para bind."""
+    with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as sock:
+        try:
+            sock.bind((host, port))
+            return True
+        except OSError:
+            return False
+
 
 SERVER_HOST: str = os.getenv("SERVER_HOST", "0.0.0.0")
 SERVER_PORT: int = int(os.getenv("SERVER_PORT", "8000"))
@@ -41,9 +54,9 @@ def _read_pid() -> int | None:
 
 def _remove_pid() -> None:
     """Remove PID file."""
-    try:
-        PID_FILE.unlink(missing_ok=True)
-    except OSError:
+    import contextlib
+
+    with contextlib.suppress(OSError):
         pass
 
 
@@ -118,7 +131,7 @@ def ensure_port_available(host: str, port: int) -> None:
     if our_pid is not None and our_pid == port_pid:
         # PID file confirma: e nosso processo anterior
         logger.warning(
-            "Port %d is in use by our previous instance (PID %d, confirmed via PID file) — killing it",
+            "Port %d in use by previous instance (PID %d, PID file) — killing",
             port,
             port_pid,
         )
@@ -158,7 +171,7 @@ def main() -> None:
 
     try:
         uvicorn.run(
-            "server.main:app",
+            "server.app:app",
             host=SERVER_HOST,
             port=SERVER_PORT,
             reload=True,
