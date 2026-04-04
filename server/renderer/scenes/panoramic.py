@@ -81,21 +81,6 @@ def _render_sky(total_positions: int, hour: int, minute: int) -> tuple[np.ndarra
     for c in range(3):
         arr[:150, :, c] = sky_top[c] + (sky_bottom[c] - sky_top[c]) * sky_t
 
-    # Nuvens tenues (camada estatica — se movem devagar pelo cache por minuto)
-    if not is_night:
-        cloud_rng: random.Random = random.Random(hour * 60 + minute // 5)
-        for _ in range(2 * total_positions):
-            cx: int = cloud_rng.randint(0, W - 1)
-            cy: int = cloud_rng.randint(20, 100)
-            cw: int = cloud_rng.randint(40, 120)
-            ch: int = cloud_rng.randint(8, 20)
-            cloud_alpha: float = cloud_rng.uniform(0.03, 0.08)
-            y_s: int = max(0, cy - ch)
-            y_e: int = min(150, cy + ch)
-            x_s: int = max(0, cx - cw)
-            x_e: int = min(W, cx + cw)
-            arr[y_s:y_e, x_s:x_e] += cloud_alpha * 255
-
     sun_x: int = 0
     if is_night:
         # Lua
@@ -309,6 +294,51 @@ def _render_stars_animated(arr: np.ndarray, t: float, meta: dict) -> None:
             arr[sy, sx] = [brightness, brightness, brightness]
 
 
+def _render_clouds_animated(arr: np.ndarray, t: float, meta: dict) -> None:
+    """Renderiza nuvens deslizando lentamente pela direita pra esquerda."""
+    if meta["is_night"]:
+        return
+
+    W: int = meta["W"]
+    total_positions: int = meta["total_positions"]
+
+    # Posicoes base das nuvens (seed fixa pra consistencia entre frames)
+    rng: random.Random = random.Random(7)
+    num_clouds: int = 3 * total_positions
+
+    for _ in range(num_clouds):
+        base_cx: int = rng.randint(0, W - 1)
+        cy: int = rng.randint(25, 95)
+        cw: int = rng.randint(50, 130)
+        ch: int = rng.randint(8, 18)
+        alpha: float = rng.uniform(0.03, 0.07)
+        drift_speed: float = rng.uniform(3.0, 8.0)
+
+        # Drift lento — posicao muda com o tempo
+        cx: int = int(base_cx + t * drift_speed) % W
+
+        # Forma eliptica com gradiente suave (nao um retangulo duro)
+        y_s: int = max(0, cy - ch)
+        y_e: int = min(150, cy + ch)
+
+        cloud_y: np.ndarray = np.arange(y_s, y_e).reshape(-1, 1).astype(np.float32)
+        cloud_x: np.ndarray = np.arange(W).reshape(1, -1).astype(np.float32)
+
+        # Distancia normalizada do centro da nuvem (elipse)
+        dy: np.ndarray = (cloud_y - cy) / max(ch, 1)
+        dx: np.ndarray = np.minimum(
+            np.abs(cloud_x - cx),
+            np.abs(cloud_x - cx + W),  # wrap-around
+        ) / max(cw, 1)
+        dx = np.minimum(dx, np.abs(cloud_x - cx - W) / max(cw, 1))
+
+        dist_sq: np.ndarray = dx * dx + dy * dy
+        cloud_mask: np.ndarray = dist_sq < 1.0
+        intensity: np.ndarray = np.where(cloud_mask, (1.0 - dist_sq) * alpha * 255, 0)
+
+        arr[y_s:y_e, :] = np.clip(arr[y_s:y_e, :] + intensity[:, :, np.newaxis], 0, 255)
+
+
 def _draw_palm_trees(img: Image.Image, total_positions: int, is_night: bool) -> None:
     """Desenha palmeiras sobre a imagem. Chamado apos composicao das camadas."""
     W: int = img.width
@@ -352,6 +382,7 @@ class PanoramicScene(SceneRenderer):
         t: float = time.monotonic()
 
         # Camada dinamica (por frame)
+        _render_clouds_animated(sky_arr, t, meta)
         _render_ocean_animated(sky_arr, t, meta)
         _render_reflection_animated(sky_arr, t, meta)
         _render_stars_animated(sky_arr, t, meta)
