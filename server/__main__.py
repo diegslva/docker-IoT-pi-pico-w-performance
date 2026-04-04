@@ -57,21 +57,34 @@ def _remove_pid() -> None:
     import contextlib
 
     with contextlib.suppress(OSError):
-        pass
+        PID_FILE.unlink(missing_ok=True)
 
 
-def _is_process_alive(pid: int) -> bool:
-    """Verifica se o processo com esse PID esta rodando (Windows)."""
+def _is_child_of(child_pid: int, parent_pid: int) -> bool:
+    """Verifica se child_pid e filho de parent_pid (Windows via wmic)."""
     try:
+        cmd: list[str] = [
+            "wmic",
+            "process",
+            "where",
+            f"ProcessId={child_pid}",
+            "get",
+            "ParentProcessId",
+            "/value",
+        ]
         result: subprocess.CompletedProcess[str] = subprocess.run(
-            ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+            cmd,
             capture_output=True,
             text=True,
             timeout=5,
         )
-        return str(pid) in result.stdout
-    except (subprocess.TimeoutExpired, OSError):
-        return False
+        for line in result.stdout.splitlines():
+            if "ParentProcessId=" in line:
+                ppid: int = int(line.split("=")[1].strip())
+                return ppid == parent_pid
+    except (subprocess.TimeoutExpired, ValueError, OSError):
+        pass
+    return False
 
 
 def _find_pid_on_port(port: int) -> int | None:
@@ -128,25 +141,30 @@ def ensure_port_available(host: str, port: int) -> None:
 
     our_pid: int | None = _read_pid()
 
-    if our_pid is not None and our_pid == port_pid:
-        # PID file confirma: e nosso processo anterior
+    is_ours: bool = False
+    if our_pid is not None:
+        # PID direto ou processo filho (uvicorn --reload cria filho)
+        is_ours = our_pid == port_pid or _is_child_of(port_pid, our_pid)
+
+    if is_ours:
+        # Sempre mata o pai (our_pid) — /T (tree kill) mata filhos junto
+        kill_target: int = our_pid
         logger.warning(
-            "Port %d in use by previous instance (PID %d, PID file) — killing",
+            "Port %d in use by our previous instance (PID file=%d, port=%d) — killing",
             port,
+            our_pid,
             port_pid,
         )
-        if _kill_process(port_pid):
-            logger.info("Process %d terminated", port_pid)
+        if _kill_process(kill_target):
+            logger.info("Process %d terminated (tree kill)", kill_target)
             _remove_pid()
             time.sleep(2)
         else:
-            logger.error("Failed to kill process %d", port_pid)
+            logger.error("Failed to kill process %d", kill_target)
             sys.exit(1)
-    elif our_pid is not None and our_pid != port_pid:
-        # PID file existe mas aponta pra outro PID — processo na porta nao e nosso
+    elif our_pid is not None:
         logger.error(
-            "Port %d is in use by process PID %d (our PID file says %d) — NOT killing. "
-            "This is NOT our process.",
+            "Port %d in use by PID %d (our PID file=%d) — NOT our process. NOT killing.",
             port,
             port_pid,
             our_pid,
