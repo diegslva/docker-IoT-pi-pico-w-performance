@@ -204,42 +204,57 @@ def render_vitoria_sports_frame(timestamp: str, frame_index: int = 0) -> bytes:
     return image_to_rgb332_direct(img)
 
 
-# --- Panoramic sunset (cached base, dynamic overlay) ---
+# --- Panoramic day/night cycle (cached per minute) ---
+_panoramic_cache: Image.Image | None = None
 _panoramic_cache_key: str = ""
 
 
+def _sky_colors(hour: int, minute: int) -> tuple[tuple[int, int, int], tuple[int, int, int], bool]:
+    """Retorna (sky_top, sky_bottom, is_night) baseado no horario."""
+    h: float = hour + minute / 60
+
+    if h < 5 or h >= 20:
+        # Night
+        return (5, 5, 20), (10, 10, 40), True
+    elif h < 6:
+        # Pre-dawn
+        t: float = h - 5
+        return (int(5 + 15 * t), int(5 + 5 * t), int(20 + 30 * t)), (int(10 + 80 * t), int(10 + 30 * t), int(40 + 20 * t)), False
+    elif h < 7.5:
+        # Dawn
+        return (20, 10, 50), (255, 100, 30), False
+    elif h < 9:
+        # Morning golden
+        return (20, 20, 80), (240, 140, 40), False
+    elif h < 15:
+        # Midday
+        return (15, 30, 100), (200, 160, 60), False
+    elif h < 17:
+        # Afternoon golden
+        return (20, 20, 80), (240, 140, 40), False
+    elif h < 18.5:
+        # Sunset
+        return (15, 5, 40), (255, 100, 30), False
+    elif h < 20:
+        # Dusk
+        t = (h - 18.5) / 1.5
+        return (int(15 - 10 * t), int(5 - 0 * t), int(40 - 20 * t)), (int(100 - 90 * t), int(40 - 30 * t), int(30 - 0 * t)), False
+    return (5, 5, 20), (10, 10, 40), True
+
+
 def _render_panoramic_base(total_positions: int, hour: int = 12, minute: int = 0) -> Image.Image:
-    """Renderiza panorama com sol animado baseado no horario.
+    """Renderiza panorama com ciclo dia/noite completo. Cacheado por minuto."""
+    global _panoramic_cache, _panoramic_cache_key
 
-    Sol se move: 6h=esquerda baixo, 12h=centro alto, 18h=direita baixo.
-    Cor do ceu muda: amanhecer=rosado, dia=azul claro, entardecer=laranja.
-    """
-    global _panoramic_cache_key
     cache_key: str = f"{total_positions}_{hour}_{minute}"
-
-    import math
+    if _panoramic_cache is not None and _panoramic_cache_key == cache_key:
+        return _panoramic_cache.copy()
 
     W: int = FRAME_WIDTH * total_positions
     H: int = FRAME_HEIGHT
+    h: float = hour + minute / 60
 
-    # Sun position based on time (6h-18h mapped across the panorama)
-    time_frac: float = max(0.0, min(1.0, (hour + minute / 60 - 6) / 12))  # 0.0=6h, 1.0=18h
-    sun_x: int = int(W * 0.1 + (W * 0.8) * time_frac)
-    sun_y: int = int(120 - 60 * math.sin(time_frac * math.pi))  # arc: low at edges, high at noon
-
-    # Sky color based on time
-    if time_frac < 0.15 or time_frac > 0.85:
-        # Dawn/dusk: orange-red
-        sky_top: tuple[int, int, int] = (15, 5, 40)
-        sky_bottom: tuple[int, int, int] = (255, 100, 30)
-    elif time_frac < 0.3 or time_frac > 0.7:
-        # Golden hour
-        sky_top = (20, 20, 80)
-        sky_bottom = (240, 140, 40)
-    else:
-        # Midday
-        sky_top = (15, 30, 100)
-        sky_bottom = (200, 160, 60)
+    sky_top, sky_bottom, is_night = _sky_colors(hour, minute)
 
     img: Image.Image = Image.new("RGB", (W, H), color=(0, 0, 0))
     draw: ImageDraw.ImageDraw = ImageDraw.Draw(img)
@@ -252,57 +267,104 @@ def _render_panoramic_base(total_positions: int, hour: int = 12, minute: int = 0
         b: int = int(sky_top[2] + (sky_bottom[2] - sky_top[2]) * t)
         draw.line([(0, y), (W - 1, y)], fill=(min(255, r), max(0, g), max(0, b)))
 
-    # Sun
-    cx: int = sun_x
-    cy: int = sun_y
-    radius: int = 40
-    for dy in range(-radius, radius + 1):
-        for dx in range(-radius, radius + 1):
-            dist: float = math.sqrt(dx * dx + dy * dy)
-            if dist <= radius:
-                intensity: float = 1.0 - (dist / radius) * 0.3
-                px: int = cx + dx
-                py: int = cy + dy
-                if 0 <= px < W and 0 <= py < H:
-                    img.putpixel((px, py), (
-                        min(255, int(255 * intensity)),
-                        min(255, int(230 * intensity)),
-                        min(255, int(60 * intensity)),
-                    ))
+    if is_night:
+        # Moon
+        moon_x: int = int(W * 0.6)
+        moon_y: int = 50
+        moon_r: int = 25
+        for dy in range(-moon_r, moon_r + 1):
+            for dx in range(-moon_r, moon_r + 1):
+                dist: float = math.sqrt(dx * dx + dy * dy)
+                if dist <= moon_r:
+                    intensity: float = 1.0 - (dist / moon_r) * 0.2
+                    px: int = moon_x + dx
+                    py: int = moon_y + dy
+                    if 0 <= px < W and 0 <= py < H:
+                        img.putpixel((px, py), (
+                            min(255, int(220 * intensity)),
+                            min(255, int(220 * intensity)),
+                            min(255, int(240 * intensity)),
+                        ))
 
-    # Ocean
+        # Stars
+        import random
+        rng: random.Random = random.Random(42)  # deterministic stars
+        for _ in range(80 * total_positions):
+            sx: int = rng.randint(0, W - 1)
+            sy: int = rng.randint(0, 130)
+            brightness: int = rng.randint(120, 255)
+            if img.getpixel((sx, sy))[0] < 30:
+                img.putpixel((sx, sy), (brightness, brightness, brightness))
+    else:
+        # Sun position (5h-19h arc)
+        sun_frac: float = max(0.0, min(1.0, (h - 5) / 14))
+        sun_x: int = int(W * 0.1 + (W * 0.8) * sun_frac)
+        sun_y: int = int(130 - 80 * math.sin(sun_frac * math.pi))
+
+        # Sun
+        radius: int = 40
+        for dy in range(-radius, radius + 1):
+            for dx in range(-radius, radius + 1):
+                dist = math.sqrt(dx * dx + dy * dy)
+                if dist <= radius:
+                    intensity = 1.0 - (dist / radius) * 0.3
+                    px = sun_x + dx
+                    py = sun_y + dy
+                    if 0 <= px < W and 0 <= py < 150:
+                        img.putpixel((px, py), (
+                            min(255, int(255 * intensity)),
+                            min(255, int(230 * intensity)),
+                            min(255, int(60 * intensity)),
+                        ))
+
+    # Ocean — darker at night
+    ocean_brightness: float = 0.2 if is_night else 1.0
     for y in range(150, H):
         depth: float = (y - 150) / (H - 150)
         for x in range(W):
             wave: float = math.sin(x * 0.03 + y * 0.08) * 12 + math.sin(x * 0.07 - y * 0.05) * 6
-            img.putpixel((x, y), (
-                max(0, min(255, int(10 * (1 - depth) + wave * 0.3))),
-                max(0, min(255, int(50 + 30 * (1 - depth) + wave * 0.5))),
-                max(0, min(255, int(120 + 40 * (1 - depth) + wave))),
-            ))
+            r = max(0, min(255, int((10 * (1 - depth) + wave * 0.3) * ocean_brightness)))
+            g = max(0, min(255, int((50 + 30 * (1 - depth) + wave * 0.5) * ocean_brightness)))
+            b = max(0, min(255, int((120 + 40 * (1 - depth) + wave) * ocean_brightness)))
+            img.putpixel((x, y), (r, g, b))
 
-    # Sun reflection
+    # Reflection (sun or moon)
+    if not is_night:
+        ref_cx: int = sun_x
+    else:
+        ref_cx = int(W * 0.6)
+
     for y in range(155, 220):
         spread: float = (y - 150) * 1.5
         for dx in range(int(-spread), int(spread) + 1):
-            x: int = cx + dx
+            x = ref_cx + dx
             if 0 <= x < W:
-                ref: float = 0.5 * (1 - abs(dx) / max(1, spread)) * (1 - (y - 155) / 65)
+                ref: float = 0.4 * (1 - abs(dx) / max(1, spread)) * (1 - (y - 155) / 65)
                 wave_mod: float = 0.5 + 0.5 * math.sin(x * 0.1 + y * 0.2)
                 ref *= wave_mod
                 pr, pg, pb = img.getpixel((x, y))
-                img.putpixel((x, y), (
-                    min(255, int(pr + 220 * ref)),
-                    min(255, int(pg + 170 * ref)),
-                    min(255, int(pb + 40 * ref)),
-                ))
+                if is_night:
+                    img.putpixel((x, y), (
+                        min(255, int(pr + 100 * ref)),
+                        min(255, int(pg + 100 * ref)),
+                        min(255, int(pb + 120 * ref)),
+                    ))
+                else:
+                    img.putpixel((x, y), (
+                        min(255, int(pr + 220 * ref)),
+                        min(255, int(pg + 170 * ref)),
+                        min(255, int(pb + 40 * ref)),
+                    ))
 
-    # Palm trees spread across displays
+    # Palm trees (silhouette — works day and night)
     palm_positions: list[int] = [80]
     if total_positions >= 2:
         palm_positions.append(W - 100)
     if total_positions >= 4:
         palm_positions.extend([W // 3, 2 * W // 3])
+
+    tree_color: tuple[int, int, int] = (5, 3, 2) if is_night else (15, 10, 5)
+    leaf_color: tuple[int, int, int] = (3, 2, 1) if is_night else (8, 6, 3)
 
     for trunk_x in palm_positions:
         for y in range(75, 155):
@@ -310,7 +372,7 @@ def _render_panoramic_base(total_positions: int, hour: int = 12, minute: int = 0
             for dx in range(-3, 4):
                 px = trunk_x + lean + dx
                 if 0 <= px < W:
-                    img.putpixel((px, y), (15, 10, 5))
+                    img.putpixel((px, y), tree_color)
         leaf_bx: int = trunk_x + int(80 * 0.12)
         leaf_by: int = 75
         for a in [-40, -20, 0, 25, 50, 70, -55]:
@@ -320,10 +382,12 @@ def _render_panoramic_base(total_positions: int, hour: int = 12, minute: int = 0
                 ly: int = int(leaf_by - t * math.sin(angle) + t * t * 0.007)
                 for w in range(-2, 3):
                     if 0 <= lx < W and 0 <= ly + w < H:
-                        img.putpixel((lx, ly + w), (8, 6, 3))
+                        img.putpixel((lx, ly + w), leaf_color)
 
+    _panoramic_cache = img.copy()
     _panoramic_cache_key = cache_key
-    logger.info("Panoramic rendered: %dx%d (%d displays) sun@%d:%02d", W, H, total_positions, hour, minute)
+    logger.info("Panoramic rendered: %dx%d (%d displays) %d:%02d %s",
+                W, H, total_positions, hour, minute, "night" if is_night else "day")
     return img
 
 
