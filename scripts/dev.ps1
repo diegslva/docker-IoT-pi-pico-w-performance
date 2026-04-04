@@ -54,48 +54,104 @@ function Remove-Everything {
     Write-Host "Nuked." -ForegroundColor Green
 }
 
+function Get-ServerIP {
+    <#
+    .SYNOPSIS
+    Detecta o IP da interface de rede real do host (exclui interfaces virtuais).
+    Usa a rota default do sistema pra identificar a interface correta.
+    #>
+
+    # Estrategia 1: interface da rota default (mais confiavel)
+    $defaultRoute = Get-NetRoute -DestinationPrefix "0.0.0.0/0" |
+        Sort-Object -Property RouteMetric |
+        Select-Object -First 1
+    if ($defaultRoute) {
+        $ifIndex = $defaultRoute.InterfaceIndex
+        $addr = Get-NetIPAddress -InterfaceIndex $ifIndex -AddressFamily IPv4 |
+            Where-Object { $_.IPAddress -ne "127.0.0.1" } |
+            Select-Object -First 1
+        if ($addr) {
+            return $addr.IPAddress
+        }
+    }
+
+    # Estrategia 2: filtrar interfaces virtuais conhecidas
+    $virtualPattern = "VirtualBox|vEthernet|Hyper-V|WSL|Docker|Loopback|VMware|Bluetooth"
+    $addr = Get-NetIPAddress -AddressFamily IPv4 |
+        Where-Object {
+            $_.IPAddress -notmatch "^(127\.|169\.254\.)" -and
+            $_.InterfaceAlias -notmatch $virtualPattern -and
+            $_.PrefixOrigin -ne "WellKnown"
+        } |
+        Sort-Object -Property InterfaceMetric |
+        Select-Object -First 1
+    if ($addr) {
+        return $addr.IPAddress
+    }
+
+    Write-Host "WARNING: Could not detect server IP automatically" -ForegroundColor Yellow
+    return "0.0.0.0"
+}
+
 function Deploy-Pico {
-    $drive = Get-Volume | Where-Object { $_.FileSystemLabel -eq "CIRCUITPY" }
-    if (-not $drive) {
-        Write-Host "ERROR: CIRCUITPY drive not found. Is the Pico W connected?" -ForegroundColor Red
+    $drives = @(Get-Volume | Where-Object { $_.FileSystemLabel -eq "CIRCUITPY" })
+    if ($drives.Count -eq 0) {
+        Write-Host "ERROR: No CIRCUITPY drives found. Is a Pico W connected via USB?" -ForegroundColor Red
         exit 1
     }
-    $driveLetter = $drive.DriveLetter
-    $dest = "${driveLetter}:\"
 
-    Write-Host "Deploying to CIRCUITPY ($dest)..." -ForegroundColor Yellow
-    Copy-Item "pico\code.py" "${dest}code.py" -Force
-    Write-Host "  code.py copied" -ForegroundColor Green
+    # Detectar configuracao uma vez
+    $serverIP = Get-ServerIP
+    $serverPort = "8000"
+    $ssid = ""
+    $password = ""
+    $deviceName = "unnamed"
 
     if (Test-Path ".env") {
         $envContent = Get-Content ".env"
-        $ssid = ($envContent | Select-String "^WIFI_SSID=(.+)$").Matches.Groups[1].Value
-        $password = ($envContent | Select-String "^WIFI_PASSWORD=(.+)$").Matches.Groups[1].Value
+        $s = ($envContent | Select-String "^WIFI_SSID=(.+)$").Matches.Groups[1].Value
+        if ($s) { $ssid = $s }
+        $p = ($envContent | Select-String "^WIFI_PASSWORD=(.+)$").Matches.Groups[1].Value
+        if ($p) { $password = $p }
+        $sp = ($envContent | Select-String "^SERVER_PORT=(.+)$").Matches.Groups[1].Value
+        if ($sp) { $serverPort = $sp }
+        $dn = ($envContent | Select-String "^DEVICE_NAME=(.+)$").Matches.Groups[1].Value
+        if ($dn) { $deviceName = $dn }
+    }
 
-        $localIPs = (Get-NetIPAddress -AddressFamily IPv4 |
-            Where-Object { $_.IPAddress -match "^192\.168\." -and $_.InterfaceAlias -notmatch "Loopback|VirtualBox|vEthernet" } |
-            Select-Object -First 1).IPAddress
+    Write-Host ""
+    Write-Host "Bootstrap config:" -ForegroundColor Cyan
+    Write-Host "  Server IP:   $serverIP" -ForegroundColor Cyan
+    Write-Host "  Server Port: $serverPort" -ForegroundColor Cyan
+    Write-Host "  Wi-Fi SSID:  $ssid" -ForegroundColor Cyan
+    Write-Host "  Devices:     $($drives.Count) Pico W(s) detected" -ForegroundColor Cyan
+    Write-Host ""
 
-        $serverPort = ($envContent | Select-String "^SERVER_PORT=(.+)$").Matches.Groups[1].Value
-        if (-not $serverPort) { $serverPort = "8000" }
+    $count = 0
+    foreach ($drive in $drives) {
+        $driveLetter = $drive.DriveLetter
+        $dest = "${driveLetter}:\"
+        $count++
 
-        $deviceName = ($envContent | Select-String "^DEVICE_NAME=(.+)$").Matches.Groups[1].Value
-        if (-not $deviceName) { $deviceName = "unnamed" }
+        Write-Host "[$count/$($drives.Count)] Deploying to CIRCUITPY ($dest)..." -ForegroundColor Yellow
+        Copy-Item "pico\code.py" "${dest}code.py" -Force
+        Write-Host "  code.py copied" -ForegroundColor Green
 
         $settingsContent = @"
 CIRCUITPY_WIFI_SSID = "$ssid"
 CIRCUITPY_WIFI_PASSWORD = "$password"
-DISPLAY_SERVER_IP = "$localIPs"
+DISPLAY_SERVER_IP = "$serverIP"
 DISPLAY_SERVER_PORT = "$serverPort"
 FETCH_INTERVAL = "30"
 DEVICE_NAME = "$deviceName"
 DEVICE_POSITION = "auto"
 "@
         Set-Content -Path "${dest}settings.toml" -Value $settingsContent -NoNewline
-        Write-Host "  settings.toml generated (server: ${localIPs}:${serverPort})" -ForegroundColor Green
+        Write-Host "  settings.toml generated" -ForegroundColor Green
     }
 
-    Write-Host "Deploy complete." -ForegroundColor Green
+    Write-Host ""
+    Write-Host "Deploy complete: $count Pico W(s) updated (server: ${serverIP}:${serverPort})" -ForegroundColor Green
 }
 
 function Set-Firewall {
