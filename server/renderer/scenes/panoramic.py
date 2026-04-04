@@ -392,8 +392,8 @@ def _render_clouds_animated(arr: np.ndarray, t: float, meta: dict) -> None:
         arr[y_s:y_e, :] = np.clip(arr[y_s:y_e, :] + intensity[:, :, np.newaxis], 0, 255)
 
 
-def _draw_palm_trees(img: Image.Image, total_positions: int, is_night: bool) -> None:
-    """Desenha palmeiras sobre a imagem. Chamado apos composicao das camadas."""
+def _draw_palm_trees(img: Image.Image, t: float, total_positions: int, is_night: bool) -> None:
+    """Desenha palmeiras com folhas balancando na brisa."""
     W: int = img.width
     palm_positions: list[int] = [80]
     if total_positions >= 2:
@@ -404,18 +404,38 @@ def _draw_palm_trees(img: Image.Image, total_positions: int, is_night: bool) -> 
     tree_color: tuple[int, int, int] = (5, 3, 2) if is_night else (15, 10, 5)
     leaf_color: tuple[int, int, int] = (3, 2, 1) if is_night else (8, 6, 3)
 
+    # Brisa global — oscilacao lenta que afeta todas as palmeiras
+    breeze: float = math.sin(t * 0.6) * 2.5 + math.sin(t * 1.1) * 1.0
+
     draw: ImageDraw.ImageDraw = ImageDraw.Draw(img)
-    for trunk_x in palm_positions:
+    for tree_idx, trunk_x in enumerate(palm_positions):
+        # Cada palmeira tem fase propria (nao balancam sincronizadas)
+        tree_phase: float = tree_idx * 1.7
+
+        # Tronco com leve oscilacao no topo
+        trunk_sway: float = breeze * 0.3 * math.sin(t * 0.5 + tree_phase)
         for y in range(75, 155):
-            lean: int = int((155 - y) * 0.12)
+            height_frac: float = (155 - y) / 80  # 0 na base, 1 no topo
+            lean: int = int((155 - y) * 0.12 + trunk_sway * height_frac)
             draw.line([(trunk_x + lean - 3, y), (trunk_x + lean + 3, y)], fill=tree_color)
-        leaf_bx: int = trunk_x + int(80 * 0.12)
+
+        # Folhas com balanco individual
+        leaf_bx: int = trunk_x + int(80 * 0.12 + trunk_sway)
         leaf_by: int = 75
-        for a in [-40, -20, 0, 25, 50, 70, -55]:
-            angle: float = math.radians(a)
+        leaf_angles: list[int] = [-40, -20, 0, 25, 50, 70, -55]
+
+        for leaf_idx, a in enumerate(leaf_angles):
+            # Cada folha balanca com frequencia e amplitude propria
+            leaf_phase: float = leaf_idx * 0.9 + tree_phase
+            leaf_sway: float = breeze * math.sin(t * 0.8 + leaf_phase)
+
+            angle: float = math.radians(a + leaf_sway * 1.5)
             points: list[tuple[int, int]] = []
             for pt in range(45):
-                lx: int = int(leaf_bx + pt * math.cos(angle))
+                # Ponta da folha balanca mais que a base (efeito chicote)
+                tip_factor: float = pt / 45
+                sway_px: float = leaf_sway * tip_factor * 0.8
+                lx: int = int(leaf_bx + pt * math.cos(angle) + sway_px)
                 ly: int = int(leaf_by - pt * math.sin(angle) + pt * pt * 0.007)
                 points.append((lx, ly))
             if len(points) >= 2:
@@ -445,8 +465,8 @@ class PanoramicScene(SceneRenderer):
         # Gaivotas (silhuetas no ceu, sobre a imagem PIL)
         _render_seagulls_animated(img, t, meta)
 
-        # Palmeiras (sobre tudo)
-        _draw_palm_trees(img, meta["total_positions"], meta["is_night"])
+        # Palmeiras balancando na brisa
+        _draw_palm_trees(img, t, meta["total_positions"], meta["is_night"])
 
         # Textos scrolling
         draw: ImageDraw.ImageDraw = ImageDraw.Draw(img)
