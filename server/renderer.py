@@ -204,6 +204,169 @@ def render_vitoria_sports_frame(timestamp: str, frame_index: int = 0) -> bytes:
     return image_to_rgb332_direct(img)
 
 
+# --- Panoramic sunset (cached base, dynamic overlay) ---
+_panoramic_cache_key: str = ""
+
+
+def _render_panoramic_base(total_positions: int, hour: int = 12, minute: int = 0) -> Image.Image:
+    """Renderiza panorama com sol animado baseado no horario.
+
+    Sol se move: 6h=esquerda baixo, 12h=centro alto, 18h=direita baixo.
+    Cor do ceu muda: amanhecer=rosado, dia=azul claro, entardecer=laranja.
+    """
+    global _panoramic_cache_key
+    cache_key: str = f"{total_positions}_{hour}_{minute}"
+
+    import math
+
+    W: int = FRAME_WIDTH * total_positions
+    H: int = FRAME_HEIGHT
+
+    # Sun position based on time (6h-18h mapped across the panorama)
+    time_frac: float = max(0.0, min(1.0, (hour + minute / 60 - 6) / 12))  # 0.0=6h, 1.0=18h
+    sun_x: int = int(W * 0.1 + (W * 0.8) * time_frac)
+    sun_y: int = int(120 - 60 * math.sin(time_frac * math.pi))  # arc: low at edges, high at noon
+
+    # Sky color based on time
+    if time_frac < 0.15 or time_frac > 0.85:
+        # Dawn/dusk: orange-red
+        sky_top: tuple[int, int, int] = (15, 5, 40)
+        sky_bottom: tuple[int, int, int] = (255, 100, 30)
+    elif time_frac < 0.3 or time_frac > 0.7:
+        # Golden hour
+        sky_top = (20, 20, 80)
+        sky_bottom = (240, 140, 40)
+    else:
+        # Midday
+        sky_top = (15, 30, 100)
+        sky_bottom = (200, 160, 60)
+
+    img: Image.Image = Image.new("RGB", (W, H), color=(0, 0, 0))
+    draw: ImageDraw.ImageDraw = ImageDraw.Draw(img)
+
+    # Sky gradient
+    for y in range(150):
+        t: float = y / 150
+        r: int = int(sky_top[0] + (sky_bottom[0] - sky_top[0]) * t)
+        g: int = int(sky_top[1] + (sky_bottom[1] - sky_top[1]) * t)
+        b: int = int(sky_top[2] + (sky_bottom[2] - sky_top[2]) * t)
+        draw.line([(0, y), (W - 1, y)], fill=(min(255, r), max(0, g), max(0, b)))
+
+    # Sun
+    cx: int = sun_x
+    cy: int = sun_y
+    radius: int = 40
+    for dy in range(-radius, radius + 1):
+        for dx in range(-radius, radius + 1):
+            dist: float = math.sqrt(dx * dx + dy * dy)
+            if dist <= radius:
+                intensity: float = 1.0 - (dist / radius) * 0.3
+                px: int = cx + dx
+                py: int = cy + dy
+                if 0 <= px < W and 0 <= py < H:
+                    img.putpixel((px, py), (
+                        min(255, int(255 * intensity)),
+                        min(255, int(230 * intensity)),
+                        min(255, int(60 * intensity)),
+                    ))
+
+    # Ocean
+    for y in range(150, H):
+        depth: float = (y - 150) / (H - 150)
+        for x in range(W):
+            wave: float = math.sin(x * 0.03 + y * 0.08) * 12 + math.sin(x * 0.07 - y * 0.05) * 6
+            img.putpixel((x, y), (
+                max(0, min(255, int(10 * (1 - depth) + wave * 0.3))),
+                max(0, min(255, int(50 + 30 * (1 - depth) + wave * 0.5))),
+                max(0, min(255, int(120 + 40 * (1 - depth) + wave))),
+            ))
+
+    # Sun reflection
+    for y in range(155, 220):
+        spread: float = (y - 150) * 1.5
+        for dx in range(int(-spread), int(spread) + 1):
+            x: int = cx + dx
+            if 0 <= x < W:
+                ref: float = 0.5 * (1 - abs(dx) / max(1, spread)) * (1 - (y - 155) / 65)
+                wave_mod: float = 0.5 + 0.5 * math.sin(x * 0.1 + y * 0.2)
+                ref *= wave_mod
+                pr, pg, pb = img.getpixel((x, y))
+                img.putpixel((x, y), (
+                    min(255, int(pr + 220 * ref)),
+                    min(255, int(pg + 170 * ref)),
+                    min(255, int(pb + 40 * ref)),
+                ))
+
+    # Palm trees spread across displays
+    palm_positions: list[int] = [80]
+    if total_positions >= 2:
+        palm_positions.append(W - 100)
+    if total_positions >= 4:
+        palm_positions.extend([W // 3, 2 * W // 3])
+
+    for trunk_x in palm_positions:
+        for y in range(75, 155):
+            lean: int = int((155 - y) * 0.12)
+            for dx in range(-3, 4):
+                px = trunk_x + lean + dx
+                if 0 <= px < W:
+                    img.putpixel((px, y), (15, 10, 5))
+        leaf_bx: int = trunk_x + int(80 * 0.12)
+        leaf_by: int = 75
+        for a in [-40, -20, 0, 25, 50, 70, -55]:
+            angle: float = math.radians(a)
+            for t in range(45):
+                lx: int = int(leaf_bx + t * math.cos(angle))
+                ly: int = int(leaf_by - t * math.sin(angle) + t * t * 0.007)
+                for w in range(-2, 3):
+                    if 0 <= lx < W and 0 <= ly + w < H:
+                        img.putpixel((lx, ly + w), (8, 6, 3))
+
+    _panoramic_cache_key = cache_key
+    logger.info("Panoramic rendered: %dx%d (%d displays) sun@%d:%02d", W, H, total_positions, hour, minute)
+    return img
+
+
+def render_panoramic_frame(
+    position: int,
+    total_positions: int,
+    timestamp: str,
+    hour: int = 12,
+    minute: int = 0,
+    frame_index: int = 0,
+) -> bytes:
+    """Renderiza frame panoramico com sol animado, retorna slice da posicao."""
+    img: Image.Image = _render_panoramic_base(total_positions, hour=hour, minute=minute)
+    draw: ImageDraw.ImageDraw = ImageDraw.Draw(img)
+    W: int = img.width
+
+    font_title: ImageFont.FreeTypeFont | ImageFont.ImageFont = _get_font_bold(36)
+    font_sub: ImageFont.FreeTypeFont | ImageFont.ImageFont = _get_font(18)
+    font_clock: ImageFont.FreeTypeFont | ImageFont.ImageFont = _get_font_bold(20)
+    font_msg: ImageFont.FreeTypeFont | ImageFont.ImageFont = _get_font_bold(18)
+
+    # Title centered across all displays
+    draw.text((W // 2 + 2, 12), "Vitoria Sports", fill=(20, 5, 0), font=font_title, anchor="mt")
+    draw.text((W // 2, 10), "Vitoria Sports", fill=(255, 220, 100), font=font_title, anchor="mt")
+    draw.text((W // 2 + 2, 48), "- ES -", fill=(20, 5, 0), font=font_sub, anchor="mt")
+    draw.text((W // 2, 46), "- ES -", fill=(200, 180, 120), font=font_sub, anchor="mt")
+
+    # Clock
+    draw.text((W // 2 + 2, 195), timestamp, fill=(20, 5, 0), font=font_clock, anchor="mt")
+    draw.text((W // 2, 193), timestamp, fill=(255, 255, 200), font=font_clock, anchor="mt")
+
+    # Rotating message
+    msg: str = MESSAGES[frame_index % len(MESSAGES)]
+    draw.text((W // 2 + 2, 218), msg, fill=(20, 5, 0), font=font_msg, anchor="mt")
+    draw.text((W // 2, 216), msg, fill=(0, 255, 150), font=font_msg, anchor="mt")
+
+    # Crop slice for this position
+    x_start: int = position * FRAME_WIDTH
+    x_end: int = x_start + FRAME_WIDTH
+    slice_img: Image.Image = img.crop((x_start, 0, x_end, FRAME_HEIGHT))
+    return image_to_rgb332_direct(slice_img)
+
+
 # --- Multi-display effects ---
 
 

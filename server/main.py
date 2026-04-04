@@ -27,6 +27,7 @@ from server.renderer import (
     FRAME_WIDTH,
     image_to_rgb332_direct,
     render_crypto_frame,
+    render_panoramic_frame,
     render_scroll_frame,
     render_vitoria_sports_frame,
     render_wall_frame,
@@ -256,10 +257,23 @@ async def display_frame(
 
         return Response(content=frame, media_type="application/octet-stream")
 
-    # Default: Vitoria Sports
+    # Default: panoramic if multiple devices, single if alone
     device_info = _devices.get(id)
     fetch_count = int(device_info["fetch_count"]) if device_info else 0
-    frame = render_vitoria_sports_frame(timestamp=ts, frame_index=fetch_count)
+    total_devices: int = max(len(_devices), 1)
+
+    if total_devices > 1:
+        now_local: datetime = datetime.now(tz=timezone(timedelta(hours=TZ_OFFSET_HOURS)))
+        frame = render_panoramic_frame(
+            position=pos,
+            total_positions=total_devices,
+            timestamp=ts,
+            hour=now_local.hour,
+            minute=now_local.minute,
+            frame_index=fetch_count,
+        )
+    else:
+        frame = render_vitoria_sports_frame(timestamp=ts, frame_index=fetch_count)
     return Response(content=frame, media_type="application/octet-stream")
 
 
