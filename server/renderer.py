@@ -399,36 +399,26 @@ def _draw_scrolling_text(
     shadow: tuple[int, int, int],
     font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
     canvas_width: int,
-    tick: float,
-    speed: float = 40.0,
+    offset_px: int,
 ) -> None:
-    """Desenha texto scrollando horizontalmente com wrap-around."""
-    # Measure text width
+    """Desenha texto scrollando da direita pra esquerda com wrap-around.
+
+    offset_px e o deslocamento absoluto em pixels (compartilhado por todos os textos).
+    """
     bbox = draw.textbbox((0, 0), text, font=font)
     text_width: int = bbox[2] - bbox[0]
+    spacing: int = canvas_width  # gap between repetitions
+    cycle: int = text_width + spacing
 
-    # Scroll offset: moves right to left
-    total_travel: int = canvas_width + text_width
-    offset: int = int(tick * speed) % total_travel
+    # Position within the cycle
+    x: int = canvas_width - (offset_px % cycle)
 
-    # Position: starts off-screen right, moves to off-screen left
-    x: int = canvas_width - offset
-
-    # Draw shadow + text
-    draw.text((x + 2, y + 2), text, fill=shadow, font=font, anchor="lt")
-    draw.text((x, y), text, fill=fill, font=font, anchor="lt")
-
-    # Wrap-around: if text exits left, draw again entering from right
-    if x + text_width < 0:
-        x2: int = x + total_travel
-        draw.text((x2 + 2, y + 2), text, fill=shadow, font=font, anchor="lt")
-        draw.text((x2, y), text, fill=fill, font=font, anchor="lt")
-    elif x > canvas_width - text_width:
-        # Also show wrapping from left side
-        x2 = x - total_travel
-        if x2 + text_width > 0:
-            draw.text((x2 + 2, y + 2), text, fill=shadow, font=font, anchor="lt")
-            draw.text((x2, y), text, fill=fill, font=font, anchor="lt")
+    # Draw main instance + one before and one after for seamless wrap
+    for shift in [-cycle, 0, cycle]:
+        draw_x: int = x + shift
+        if -text_width <= draw_x <= canvas_width:
+            draw.text((draw_x + 2, y + 2), text, fill=shadow, font=font, anchor="lt")
+            draw.text((draw_x, y), text, fill=fill, font=font, anchor="lt")
 
 
 def render_panoramic_frame(
@@ -453,20 +443,21 @@ def render_panoramic_frame(
     # Time-based tick for smooth scrolling (seconds since midnight)
     tick: float = hour * 3600 + minute * 60 + second
 
-    # All text scrolls right-to-left at the same speed
+    # Single offset for all text — same speed, same direction, perfectly synchronized
     SCROLL_SPEED: float = 40.0
+    offset_px: int = int(tick * SCROLL_SPEED)
 
     _draw_scrolling_text(
         draw, "Vitoria Sports  -  ES", y=10,
         fill=(255, 220, 100), shadow=(20, 5, 0),
-        font=font_title, canvas_width=W, tick=tick, speed=SCROLL_SPEED,
+        font=font_title, canvas_width=W, offset_px=offset_px,
     )
 
     clock_text: str = f"{timestamp}     Vitoria Sports     {timestamp}"
     _draw_scrolling_text(
         draw, clock_text, y=193,
         fill=(255, 255, 200), shadow=(20, 5, 0),
-        font=font_clock, canvas_width=W, tick=tick, speed=SCROLL_SPEED,
+        font=font_clock, canvas_width=W, offset_px=offset_px,
     )
 
     msg: str = MESSAGES[frame_index % len(MESSAGES)]
@@ -474,7 +465,7 @@ def render_panoramic_frame(
     _draw_scrolling_text(
         draw, full_msg, y=216,
         fill=(0, 255, 150), shadow=(20, 5, 0),
-        font=font_msg, canvas_width=W, tick=tick, speed=SCROLL_SPEED,
+        font=font_msg, canvas_width=W, offset_px=offset_px,
     )
 
     # Crop slice for this position
