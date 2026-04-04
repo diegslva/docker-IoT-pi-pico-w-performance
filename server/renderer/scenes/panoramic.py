@@ -1,8 +1,16 @@
-"""Cena panoramica — multi-display com ciclo dia/noite, sol/lua, scrolling text."""
+"""Cena panoramica — multi-display com ciclo dia/noite, animacoes em tempo real.
+
+Arquitetura de camadas:
+- Camada estatica (cacheada por minuto): ceu, sol/lua, palmeiras
+- Camada dinamica (por frame): oceano com ondas, reflexo cintilante, estrelas piscando
+
+A 15 FPS via TCP streaming, as animacoes ficam visivelmente fluidas.
+"""
 
 import logging
 import math
 import random
+import time
 
 import numpy as np
 from PIL import Image, ImageDraw
@@ -14,17 +22,10 @@ from server.renderer.text import draw_scrolling_text
 
 logger: logging.Logger = logging.getLogger("scene.panoramic")
 
-MESSAGES: list[str] = [
-    "Bem-vindo!",
-    "Bora treinar!",
-    "Supere seus limites",
-    "Foco e disciplina",
-    "Seu corpo agradece",
-    "Mais forte a cada dia",
-]
-
-_panoramic_cache: Image.Image | None = None
-_panoramic_cache_key: str = ""
+# --- Cache da camada estatica (ceu + sol/lua + palmeiras) ---
+_sky_cache: np.ndarray | None = None
+_sky_cache_key: str = ""
+_sky_cache_meta: dict = {}
 
 
 def _sky_colors(hour: int, minute: int) -> tuple[tuple[int, int, int], tuple[int, int, int], bool]:
@@ -60,13 +61,13 @@ def _sky_colors(hour: int, minute: int) -> tuple[tuple[int, int, int], tuple[int
     return (5, 5, 20), (10, 10, 40), True
 
 
-def _render_base(total_positions: int, hour: int, minute: int) -> Image.Image:
-    """Renderiza panorama base via NumPy. Cacheado por minuto."""
-    global _panoramic_cache, _panoramic_cache_key
+def _render_sky(total_positions: int, hour: int, minute: int) -> tuple[np.ndarray, dict]:
+    """Renderiza camada estatica (ceu + astros + palmeiras). Cacheada por minuto."""
+    global _sky_cache, _sky_cache_key, _sky_cache_meta
 
     cache_key: str = f"{total_positions}_{hour}_{minute}"
-    if _panoramic_cache is not None and _panoramic_cache_key == cache_key:
-        return _panoramic_cache.copy()
+    if _sky_cache is not None and _sky_cache_key == cache_key:
+        return _sky_cache.copy(), _sky_cache_meta
 
     W: int = FRAME_WIDTH * total_positions
     H: int = FRAME_HEIGHT
@@ -80,8 +81,24 @@ def _render_base(total_positions: int, hour: int, minute: int) -> Image.Image:
     for c in range(3):
         arr[:150, :, c] = sky_top[c] + (sky_bottom[c] - sky_top[c]) * sky_t
 
+    # Nuvens tenues (camada estatica — se movem devagar pelo cache por minuto)
+    if not is_night:
+        cloud_rng: random.Random = random.Random(hour * 60 + minute // 5)
+        for _ in range(2 * total_positions):
+            cx: int = cloud_rng.randint(0, W - 1)
+            cy: int = cloud_rng.randint(20, 100)
+            cw: int = cloud_rng.randint(40, 120)
+            ch: int = cloud_rng.randint(8, 20)
+            cloud_alpha: float = cloud_rng.uniform(0.03, 0.08)
+            y_s: int = max(0, cy - ch)
+            y_e: int = min(150, cy + ch)
+            x_s: int = max(0, cx - cw)
+            x_e: int = min(W, cx + cw)
+            arr[y_s:y_e, x_s:x_e] += cloud_alpha * 255
+
+    sun_x: int = 0
     if is_night:
-        # Moon
+        # Lua
         moon_x: int = int(W * 0.6)
         moon_y: int = 50
         moon_r: int = 25
@@ -92,10 +109,10 @@ def _render_base(total_positions: int, hour: int, minute: int) -> Image.Image:
         mask: np.ndarray = dist <= moon_r
         intensity: np.ndarray = np.where(mask, 1.0 - (dist / moon_r) * 0.2, 0)
 
-        y_s: int = max(0, moon_y - moon_r)
-        y_e: int = min(H, moon_y + moon_r + 1)
-        x_s: int = max(0, moon_x - moon_r)
-        x_e: int = min(W, moon_x + moon_r + 1)
+        y_s = max(0, moon_y - moon_r)
+        y_e = min(H, moon_y + moon_r + 1)
+        x_s = max(0, moon_x - moon_r)
+        x_e = min(W, moon_x + moon_r + 1)
         sl_y: slice = slice(y_s - (moon_y - moon_r), y_e - (moon_y - moon_r))
         sl_x: slice = slice(x_s - (moon_x - moon_r), x_e - (moon_x - moon_r))
         moon_i: np.ndarray = intensity[sl_y, sl_x]
@@ -105,19 +122,61 @@ def _render_base(total_positions: int, hour: int, minute: int) -> Image.Image:
         arr[y_s:y_e, x_s:x_e, 1] = np.where(moon_mask, 220 * moon_i, arr[y_s:y_e, x_s:x_e, 1])
         arr[y_s:y_e, x_s:x_e, 2] = np.where(moon_mask, 240 * moon_i, arr[y_s:y_e, x_s:x_e, 2])
 
-        rng: random.Random = random.Random(42)
-        for _ in range(80 * total_positions):
-            sx: int = rng.randint(0, W - 1)
-            sy: int = rng.randint(0, 130)
-            brightness: int = rng.randint(120, 255)
-            if arr[sy, sx, 0] < 30:
-                arr[sy, sx] = [brightness, brightness, brightness]
+        # Glow lunar (halo suave)
+        glow_r: int = 60
+        gy, gx = np.ogrid[
+            moon_y - glow_r : moon_y + glow_r + 1, moon_x - glow_r : moon_x + glow_r + 1
+        ]
+        glow_dist: np.ndarray = np.sqrt((gx - moon_x) ** 2 + (gy - moon_y) ** 2)
+        glow_mask: np.ndarray = (glow_dist > moon_r) & (glow_dist <= glow_r)
+        glow_i: np.ndarray = np.where(glow_mask, 0.15 * (1 - glow_dist / glow_r), 0)
+
+        gy_s: int = max(0, moon_y - glow_r)
+        gy_e: int = min(H, moon_y + glow_r + 1)
+        gx_s: int = max(0, moon_x - glow_r)
+        gx_e: int = min(W, moon_x + glow_r + 1)
+        gsl_y: slice = slice(gy_s - (moon_y - glow_r), gy_e - (moon_y - glow_r))
+        gsl_x: slice = slice(gx_s - (moon_x - glow_r), gx_e - (moon_x - glow_r))
+        g_i: np.ndarray = glow_i[gsl_y, gsl_x]
+
+        arr[gy_s:gy_e, gx_s:gx_e, 0] = np.clip(arr[gy_s:gy_e, gx_s:gx_e, 0] + 180 * g_i, 0, 255)
+        arr[gy_s:gy_e, gx_s:gx_e, 1] = np.clip(arr[gy_s:gy_e, gx_s:gx_e, 1] + 180 * g_i, 0, 255)
+        arr[gy_s:gy_e, gx_s:gx_e, 2] = np.clip(arr[gy_s:gy_e, gx_s:gx_e, 2] + 200 * g_i, 0, 255)
+
+        sun_x = moon_x
     else:
+        # Sol com glow
         sun_frac: float = max(0.0, min(1.0, (h - 5) / 14))
-        sun_x: int = int(W * 0.1 + (W * 0.8) * sun_frac)
+        sun_x = int(W * 0.1 + (W * 0.8) * sun_frac)
         sun_y: int = int(130 - 80 * math.sin(sun_frac * math.pi))
         radius: int = 40
 
+        # Glow solar (halo quente)
+        glow_r = 80
+        gy2, gx2 = np.ogrid[
+            max(0, sun_y - glow_r) : min(150, sun_y + glow_r + 1),
+            max(0, sun_x - glow_r) : min(W, sun_x + glow_r + 1),
+        ]
+        glow_d: np.ndarray = np.sqrt((gx2 - sun_x) ** 2 + (gy2 - sun_y) ** 2)
+        glow_mask2: np.ndarray = (glow_d > radius) & (glow_d <= glow_r)
+        glow_i2: np.ndarray = np.where(glow_mask2, 0.12 * (1 - glow_d / glow_r), 0)
+
+        gy2_s: int = max(0, sun_y - glow_r)
+        gy2_e: int = min(150, sun_y + glow_r + 1)
+        gx2_s: int = max(0, sun_x - glow_r)
+        gx2_e: int = min(W, sun_x + glow_r + 1)
+
+        arr[gy2_s:gy2_e, gx2_s:gx2_e, 0] = np.clip(
+            arr[gy2_s:gy2_e, gx2_s:gx2_e, 0] + 255 * glow_i2, 0, 255
+        )
+        arr[gy2_s:gy2_e, gx2_s:gx2_e, 1] = np.clip(
+            arr[gy2_s:gy2_e, gx2_s:gx2_e, 1] + 200 * glow_i2, 0, 255
+        )
+        arr[gy2_s:gy2_e, gx2_s:gx2_e, 2] = np.clip(
+            arr[gy2_s:gy2_e, gx2_s:gx2_e, 2] + 60 * glow_i2, 0, 255
+        )
+
+        # Sol
         sy_s: int = max(0, sun_y - radius)
         sy_e: int = min(150, sun_y + radius + 1)
         sx_s: int = max(0, sun_x - radius)
@@ -138,29 +197,84 @@ def _render_base(total_positions: int, hour: int, minute: int) -> Image.Image:
             sun_mask, np.minimum(255, 60 * sun_i), arr[sy_s:sy_e, sx_s:sx_e, 2]
         )
 
-    # Ocean
+    # Metadata pra camada dinamica
+    meta: dict = {
+        "is_night": is_night,
+        "sun_x": sun_x,
+        "W": W,
+        "H": H,
+        "total_positions": total_positions,
+    }
+
+    _sky_cache = np.clip(arr, 0, 255)
+    _sky_cache_key = cache_key
+    _sky_cache_meta = meta
+    logger.info(
+        "Sky layer rendered: %dx%d %d:%02d %s",
+        W,
+        H,
+        hour,
+        minute,
+        "night" if is_night else "day",
+    )
+    return _sky_cache.copy(), meta
+
+
+def _render_ocean_animated(arr: np.ndarray, t: float, meta: dict) -> None:
+    """Renderiza oceano animado com ondas em movimento. Modifica arr in-place."""
+    W: int = meta["W"]
+    H: int = meta["H"]
+    is_night: bool = meta["is_night"]
+
     ocean_brightness: float = 0.2 if is_night else 1.0
     ocean_y: np.ndarray = np.arange(150, H).reshape(-1, 1).astype(np.float32)
     ocean_x: np.ndarray = np.arange(W).reshape(1, -1).astype(np.float32)
     depth: np.ndarray = (ocean_y - 150) / (H - 150)
+
+    # Ondas com offset temporal — se movem continuamente
     wave: np.ndarray = (
-        np.sin(ocean_x * 0.03 + ocean_y * 0.08) * 12 + np.sin(ocean_x * 0.07 - ocean_y * 0.05) * 6
+        np.sin(ocean_x * 0.03 + ocean_y * 0.08 + t * 1.2) * 12
+        + np.sin(ocean_x * 0.07 - ocean_y * 0.05 + t * 0.8) * 6
+        + np.sin(ocean_x * 0.015 + t * 0.5) * 4
     )
 
-    arr[150:, :, 0] = np.clip((10 * (1 - depth) + wave * 0.3) * ocean_brightness, 0, 255)
-    arr[150:, :, 1] = np.clip((50 + 30 * (1 - depth) + wave * 0.5) * ocean_brightness, 0, 255)
-    arr[150:, :, 2] = np.clip((120 + 40 * (1 - depth) + wave) * ocean_brightness, 0, 255)
+    # Espuma nas cristas (pontos brancos onde a onda e alta)
+    foam: np.ndarray = np.where(wave > 14, (wave - 14) * 0.1, 0)
 
-    # Reflection
-    ref_cx: int = int(W * 0.6) if is_night else sun_x
+    arr[150:, :, 0] = np.clip(
+        (10 * (1 - depth) + wave * 0.3 + foam * 80) * ocean_brightness, 0, 255
+    )
+    arr[150:, :, 1] = np.clip(
+        (50 + 30 * (1 - depth) + wave * 0.5 + foam * 90) * ocean_brightness, 0, 255
+    )
+    arr[150:, :, 2] = np.clip(
+        (120 + 40 * (1 - depth) + wave + foam * 100) * ocean_brightness, 0, 255
+    )
+
+
+def _render_reflection_animated(arr: np.ndarray, t: float, meta: dict) -> None:
+    """Renderiza reflexo cintilante do sol/lua na agua. Modifica arr in-place."""
+    W: int = meta["W"]
+    is_night: bool = meta["is_night"]
+    ref_cx: int = meta["sun_x"]
+
     ref_y: np.ndarray = np.arange(155, 220).reshape(-1, 1).astype(np.float32)
     ref_x: np.ndarray = np.arange(W).reshape(1, -1).astype(np.float32)
     spread: np.ndarray = (ref_y - 150) * 1.5
     dx_abs: np.ndarray = np.abs(ref_x - ref_cx)
+
     ref_i: np.ndarray = (
         0.4 * np.maximum(0, 1 - dx_abs / np.maximum(1, spread)) * (1 - (ref_y - 155) / 65)
     )
-    ref_i *= 0.5 + 0.5 * np.sin(ref_x * 0.1 + ref_y * 0.2)
+
+    # Cintilacao — shimmer com multiplas frequencias temporais
+    shimmer: np.ndarray = (
+        0.3
+        + 0.3 * np.sin(ref_x * 0.1 + ref_y * 0.2 + t * 2.5)
+        + 0.2 * np.sin(ref_x * 0.25 - t * 1.8)
+        + 0.2 * np.sin(ref_y * 0.15 + t * 3.2)
+    )
+    ref_i *= shimmer
 
     if is_night:
         arr[155:220, :, 0] = np.clip(arr[155:220, :, 0] + 100 * ref_i, 0, 255)
@@ -171,9 +285,33 @@ def _render_base(total_positions: int, hour: int, minute: int) -> Image.Image:
         arr[155:220, :, 1] = np.clip(arr[155:220, :, 1] + 170 * ref_i, 0, 255)
         arr[155:220, :, 2] = np.clip(arr[155:220, :, 2] + 40 * ref_i, 0, 255)
 
-    img: Image.Image = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8))
 
-    # Palm trees
+def _render_stars_animated(arr: np.ndarray, t: float, meta: dict) -> None:
+    """Renderiza estrelas piscando (noite). Modifica arr in-place."""
+    if not meta["is_night"]:
+        return
+
+    W: int = meta["W"]
+    total_positions: int = meta["total_positions"]
+    rng: random.Random = random.Random(42)
+
+    for _ in range(80 * total_positions):
+        sx: int = rng.randint(0, W - 1)
+        sy: int = rng.randint(0, 130)
+        base_brightness: int = rng.randint(120, 255)
+
+        if arr[sy, sx, 0] < 30:
+            # Cada estrela pisca com frequencia e fase proprias
+            freq: float = rng.uniform(0.5, 3.0)
+            phase: float = rng.uniform(0, 6.28)
+            twinkle: float = 0.5 + 0.5 * math.sin(t * freq + phase)
+            brightness: float = base_brightness * twinkle
+            arr[sy, sx] = [brightness, brightness, brightness]
+
+
+def _draw_palm_trees(img: Image.Image, total_positions: int, is_night: bool) -> None:
+    """Desenha palmeiras sobre a imagem. Chamado apos composicao das camadas."""
+    W: int = img.width
     palm_positions: list[int] = [80]
     if total_positions >= 2:
         palm_positions.append(W - 100)
@@ -193,33 +331,37 @@ def _render_base(total_positions: int, hour: int, minute: int) -> Image.Image:
         for a in [-40, -20, 0, 25, 50, 70, -55]:
             angle: float = math.radians(a)
             points: list[tuple[int, int]] = []
-            for t in range(45):
-                lx: int = int(leaf_bx + t * math.cos(angle))
-                ly: int = int(leaf_by - t * math.sin(angle) + t * t * 0.007)
+            for pt in range(45):
+                lx: int = int(leaf_bx + pt * math.cos(angle))
+                ly: int = int(leaf_by - pt * math.sin(angle) + pt * pt * 0.007)
                 points.append((lx, ly))
             if len(points) >= 2:
                 draw.line(points, fill=leaf_color, width=4)
 
-    _panoramic_cache = img.copy()
-    _panoramic_cache_key = cache_key
-    logger.info(
-        "Panoramic rendered (NumPy): %dx%d %d:%02d %s",
-        W,
-        H,
-        hour,
-        minute,
-        "night" if is_night else "day",
-    )
-    return img
-
 
 class PanoramicScene(SceneRenderer):
-    """Cena panoramica multi-display com ciclo dia/noite e textos scrolling."""
+    """Cena panoramica multi-display com animacoes em tempo real."""
 
     SCROLL_SPEED: float = 15.0
 
     def render(self, ctx: RenderContext) -> bytes:
-        img: Image.Image = _render_base(ctx.total_devices, ctx.hour, ctx.minute)
+        # Camada estatica (cacheada por minuto)
+        sky_arr, meta = _render_sky(ctx.total_devices, ctx.hour, ctx.minute)
+
+        # Tempo fracionario pra animacoes sub-segundo
+        t: float = time.monotonic()
+
+        # Camada dinamica (por frame)
+        _render_ocean_animated(sky_arr, t, meta)
+        _render_reflection_animated(sky_arr, t, meta)
+        _render_stars_animated(sky_arr, t, meta)
+
+        img: Image.Image = Image.fromarray(np.clip(sky_arr, 0, 255).astype(np.uint8))
+
+        # Palmeiras (sobre tudo)
+        _draw_palm_trees(img, meta["total_positions"], meta["is_night"])
+
+        # Textos scrolling
         draw: ImageDraw.ImageDraw = ImageDraw.Draw(img)
         W: int = img.width
 
@@ -232,8 +374,6 @@ class PanoramicScene(SceneRenderer):
         )
         offset_px: int = int(tick * self.SCROLL_SPEED)
 
-        # Todos os textos com mesmo comprimento pra mesmo cycle visual.
-        # Pad com espacos pra igualar largura percebida.
         title_str: str = "Vitoria Sports - ES"
         clock_str: str = f"Vitoria Sports  -  {ctx.timestamp}  -  ES"
         motiv_str: str = "Vitoria Sports  -  Bora treinar!  -  ES"
