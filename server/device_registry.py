@@ -64,7 +64,7 @@ class DeviceRegistry:
                     last: datetime = datetime.strptime(str(info["last_seen"]), "%Y-%m-%d %H:%M:%S")
                     last = last.replace(tzinfo=now.tzinfo)
                     is_online: bool = (now - last).total_seconds() < DEVICE_OFFLINE_SECONDS
-                except (ValueError, TypeError):
+                except ValueError, TypeError:
                     is_online = False
 
                 if is_online:

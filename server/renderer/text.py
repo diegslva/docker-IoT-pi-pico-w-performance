@@ -1,8 +1,12 @@
 """Utilidades de texto scrolling para renderizacao."""
 
+import logging
+
 from PIL import ImageDraw, ImageFont
 
 from server.renderer.rgb332 import FRAME_WIDTH
+
+logger: logging.Logger = logging.getLogger("renderer.text")
 
 
 def draw_scrolling_text(

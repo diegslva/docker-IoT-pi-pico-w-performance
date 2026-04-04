@@ -1,11 +1,15 @@
 """Efeito Wave — imagem viaja de TV em TV."""
 
+import logging
+
 from PIL import Image
 
 from server.renderer.effects.base import EffectContext, EffectRenderer
 from server.renderer.rgb332 import FRAME_HEIGHT, FRAME_WIDTH, image_to_rgb332
 from server.renderer.scenes.base import RenderContext
 from server.renderer.scenes.vitoria_sports import VitoriaSportsScene
+
+logger: logging.Logger = logging.getLogger("effect.wave")
 
 _fallback_scene: VitoriaSportsScene = VitoriaSportsScene()
 

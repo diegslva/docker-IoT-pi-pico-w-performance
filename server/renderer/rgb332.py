@@ -4,8 +4,12 @@ RGB332: 3 bits red (bits 7-5) + 3 bits green (bits 4-2) + 2 bits blue (bits 1-0)
 Total: 256 cores possiveis.
 """
 
+import logging
+
 import numpy as np
 from PIL import Image
+
+logger: logging.Logger = logging.getLogger("renderer.rgb332")
 
 FRAME_WIDTH: int = 320
 FRAME_HEIGHT: int = 240

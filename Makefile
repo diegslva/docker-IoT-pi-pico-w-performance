@@ -31,6 +31,24 @@ check: format-check lint ## Roda todas as verificacoes
 
 ## --- Infra ---
 
+up: ## Sobe Prometheus + Grafana (monitoring stack)
+	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev.ps1 up
+
+down: ## Para monitoring stack
+	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev.ps1 down
+
+restart: ## Reinicia monitoring stack
+	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev.ps1 restart
+
+nuke: ## Remove tudo (containers + volumes)
+	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev.ps1 nuke
+
+ps: ## Mostra status dos containers
+	docker compose ps
+
+logs: ## Mostra logs dos containers
+	docker compose logs -f --tail=50
+
 firewall: ## Cria regra de firewall para o servidor
 	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev.ps1 firewall
 
@@ -39,4 +57,4 @@ firewall: ## Cria regra de firewall para o servidor
 help: ## Mostra esta ajuda
 	@powershell -NoProfile -Command "Get-Content Makefile | Select-String '^\w+:.*##' | ForEach-Object { $$line = $$_.Line; $$parts = $$line -split '##'; $$cmd = ($$parts[0] -replace ':.*','').Trim(); $$desc = $$parts[1].Trim(); Write-Host ('  {0,-16} {1}' -f $$cmd, $$desc) }"
 
-.PHONY: dev deploy lint lint-fix format format-check test check firewall help
+.PHONY: dev deploy lint lint-fix format format-check test check up down restart nuke ps logs firewall help

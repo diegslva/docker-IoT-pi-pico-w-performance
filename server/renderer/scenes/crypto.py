@@ -1,10 +1,14 @@
 """Cena Crypto Ticker — exibe cotacoes BTC/ETH."""
 
+import logging
+
 from PIL import Image, ImageDraw
 
 from server.renderer.fonts import get_font, get_font_bold
 from server.renderer.rgb332 import FRAME_HEIGHT, FRAME_WIDTH, image_to_rgb332
 from server.renderer.scenes.base import RenderContext, SceneRenderer
+
+logger: logging.Logger = logging.getLogger("scene.crypto")
 
 # Cores exatas RGB332
 BLACK: tuple[int, int, int] = (0, 0, 0)
