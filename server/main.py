@@ -139,10 +139,10 @@ def _register_device(device_id: str, name: str, ip: str, position: int = 0) -> N
 
 # --- Effect State ---
 _effect_mode: str = "default"
-_effect_image: "Image.Image | None" = None
+_effect_image: Image.Image | None = None
 _effect_speed: int = 20
 _effect_total_positions: int = 12
-_effect_tick: int = 0
+_effect_start_time: float = 0.0
 
 
 # --- Crypto Cache ---
@@ -223,14 +223,15 @@ async def display_frame(
 
     # Apply active effect
     if _effect_mode != "default" and _effect_image is not None:
-        _effect_tick += 1
+        # Time-based tick — all devices in the same second see the same tick
+        tick: int = int(time.monotonic() - _effect_start_time)
         frame: bytes
 
         if _effect_mode == "wave":
             frame = render_wave_frame(
                 effect_image=_effect_image,
                 position=pos,
-                tick=_effect_tick,
+                tick=tick,
                 total_positions=_effect_total_positions,
                 timestamp=ts,
             )
@@ -244,7 +245,7 @@ async def display_frame(
             frame = render_scroll_frame(
                 effect_image=_effect_image,
                 position=pos,
-                tick=_effect_tick,
+                tick=tick,
                 total_positions=_effect_total_positions,
                 speed=_effect_speed,
             )
@@ -347,7 +348,7 @@ async def set_effect(
     _effect_mode = mode
     _effect_speed = speed
     _effect_total_positions = total_positions
-    _effect_tick = 0
+    _effect_start_time = time.monotonic()
 
     logger.info("Effect set: mode=%s positions=%d speed=%d", mode, total_positions, speed)
     return EffectResponse(status="ok", mode=mode, total_positions=total_positions, speed=speed)
@@ -359,7 +360,7 @@ async def clear_effect() -> dict[str, str]:
     global _effect_mode, _effect_image, _effect_tick
     _effect_mode = "default"
     _effect_image = None
-    _effect_tick = 0
+    _effect_start_time = 0.0
     logger.info("Effect cleared")
     return {"status": "ok"}
 

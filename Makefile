@@ -2,8 +2,8 @@
 
 ## --- App ---
 
-dev: ## Roda servidor FastAPI com hot-reload
-	uv run uvicorn server.main:app --host 0.0.0.0 --port 8000 --reload
+dev: ## Roda servidor FastAPI (verifica porta, mata processo anterior se necessario)
+	uv run python -m server
 
 ## --- Pico W ---
 
