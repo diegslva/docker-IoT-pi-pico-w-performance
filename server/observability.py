@@ -331,6 +331,12 @@ stream_frames_pushed_total = Counter(
     "Total frames pushed via TCP streaming",
 )
 
+stream_fps = Gauge(
+    "stream_fps",
+    "Current FPS per streaming connection",
+    labels=["device_id"],
+)
+
 _ALL_METRICS: list[Counter | Gauge | Histogram] = [
     http_request_duration,
     http_requests_total,
@@ -345,6 +351,7 @@ _ALL_METRICS: list[Counter | Gauge | Histogram] = [
     server_start_timestamp,
     stream_connections_active,
     stream_frames_pushed_total,
+    stream_fps,
 ]
 
 

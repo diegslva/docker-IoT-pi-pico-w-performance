@@ -23,6 +23,7 @@ from server.observability import (
     frame_render_duration,
     frames_rendered_total,
     stream_connections_active,
+    stream_fps,
     stream_frames_pushed_total,
 )
 from server.renderer.config import FRAME_SIZE
@@ -139,8 +140,13 @@ async def _handle_client(
         # 3. Loop de streaming
         target_interval: float = 1.0 / STREAM_FPS
         frame_count: int = 0
+        fps_timer: float = time.monotonic()
+        fps_frame_count: int = 0
+        LOG_INTERVAL: int = 100  # logar a cada N frames
 
         while not shutdown_event.is_set():
+            frame_start: float = time.monotonic()
+
             total_devices: int = await device_registry.count()
 
             # Atualizar registro (last_seen + fetch_count)
@@ -160,7 +166,26 @@ async def _handle_client(
             await writer.drain()
 
             frame_count += 1
+            fps_frame_count += 1
             stream_frames_pushed_total.inc()
+
+            # FPS real a cada LOG_INTERVAL frames
+            if fps_frame_count >= LOG_INTERVAL:
+                elapsed: float = time.monotonic() - fps_timer
+                fps: float = fps_frame_count / elapsed if elapsed > 0 else 0
+                render_ms: float = (time.monotonic() - frame_start) * 1000
+                stream_fps.set(fps, device_id=device_id)
+                logger.info(
+                    "Stream %s (%s): %.1f FPS (target %d) | %d frames | render ~%.1fms",
+                    name,
+                    device_id,
+                    fps,
+                    STREAM_FPS,
+                    frame_count,
+                    render_ms,
+                )
+                fps_timer = time.monotonic()
+                fps_frame_count = 0
 
             await asyncio.sleep(target_interval)
 
