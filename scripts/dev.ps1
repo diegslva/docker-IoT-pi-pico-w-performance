@@ -79,12 +79,17 @@ function Deploy-Pico {
         $serverPort = ($envContent | Select-String "^SERVER_PORT=(.+)$").Matches.Groups[1].Value
         if (-not $serverPort) { $serverPort = "8000" }
 
+        $deviceName = ($envContent | Select-String "^DEVICE_NAME=(.+)$").Matches.Groups[1].Value
+        if (-not $deviceName) { $deviceName = "unnamed" }
+
         $settingsContent = @"
 CIRCUITPY_WIFI_SSID = "$ssid"
 CIRCUITPY_WIFI_PASSWORD = "$password"
 DISPLAY_SERVER_IP = "$localIPs"
 DISPLAY_SERVER_PORT = "$serverPort"
 FETCH_INTERVAL = "30"
+DEVICE_NAME = "$deviceName"
+DEVICE_POSITION = "auto"
 "@
         Set-Content -Path "${dest}settings.toml" -Value $settingsContent -NoNewline
         Write-Host "  settings.toml generated (server: ${localIPs}:${serverPort})" -ForegroundColor Green

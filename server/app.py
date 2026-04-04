@@ -15,13 +15,16 @@ from fastapi import FastAPI, Form, Query, UploadFile
 from fastapi.responses import Response
 from PIL import Image
 
-from server.device_registry import DeviceRegistry
+from server.device_registry import AUTO_POSITION, DeviceRegistry
 from server.effect_manager import EffectManager
 from server.models import (
     DeviceListResponse,
     DisplayData,
     EffectResponse,
     HealthResponse,
+    PositionResponse,
+    ReorderRequest,
+    ReorderResponse,
 )
 from server.observability import (
     devices_online,
@@ -71,7 +74,7 @@ async def display_frame(
 
     State machine: custom_frame > effect > panoramic (multi) > vitoria_sports (single)
     """
-    await device_registry.register(device_id=id, name=name, ip=ip, position=pos)
+    actual_pos: int = await device_registry.register(device_id=id, name=name, ip=ip, position=pos)
 
     # Update device gauges
     device_list = await device_registry.list_devices()
@@ -94,7 +97,7 @@ async def display_frame(
         if effect is not None:
             ctx = EffectContext(
                 image=effect_manager.image,
-                position=pos,
+                position=actual_pos,
                 tick=effect_manager.tick(),
                 total_positions=effect_manager.total_positions,
                 speed=effect_manager.speed,
@@ -116,7 +119,7 @@ async def display_frame(
     scene = SCENE_REGISTRY[scene_name]
 
     ctx = RenderContext(
-        position=pos,
+        position=actual_pos,
         total_devices=max(total_devices, 1),
         timestamp=ts,
         hour=now.hour,
@@ -131,6 +134,23 @@ async def display_frame(
     frame_render_duration.observe(duration, scene=scene_name, device_id=id)
     frames_rendered_total.inc(scene=scene_name)
     return Response(content=frame, media_type="application/octet-stream")
+
+
+@app.get("/api/position")
+async def get_position(
+    id: str = Query(description="Device MAC address"),
+    name: str = Query(default="unnamed", description="Device friendly name"),
+    ip: str = Query(default="0.0.0.0", description="Device IP address"),
+) -> PositionResponse:
+    """Auto-discovery: Pico W solicita posicao no boot.
+
+    Registra o device (se novo) e retorna posicao atribuida.
+    """
+    assigned: int = await device_registry.register(
+        device_id=id, name=name, ip=ip, position=AUTO_POSITION
+    )
+    was_known: bool = (await device_registry.get_device(id) or {}).get("fetch_count", 0) > 1
+    return PositionResponse(device_id=id, position=assigned, auto_assigned=not was_known)
 
 
 @app.get("/api/devices")
@@ -179,6 +199,13 @@ async def clear_effect() -> dict[str, str]:
     """Remove efeito e volta pro padrao."""
     await effect_manager.clear_effect()
     return {"status": "ok"}
+
+
+@app.post("/api/devices/reorder")
+async def reorder_devices(body: ReorderRequest) -> ReorderResponse:
+    """Reordena posicoes dos devices. Aceita lista de MACs na ordem desejada."""
+    positions: dict[str, int] = await device_registry.reorder(body.order)
+    return ReorderResponse(status="ok", positions=positions)
 
 
 @app.get("/api/health")

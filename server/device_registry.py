@@ -1,4 +1,4 @@
-"""Registry de devices Pico W com lock async."""
+"""Registry de devices Pico W com lock async e auto-assign de posicao."""
 
 import asyncio
 import logging
@@ -10,17 +10,34 @@ from server.tz_utils import local_now
 logger: logging.Logger = logging.getLogger("device_registry")
 
 DEVICE_OFFLINE_SECONDS: int = 60
+AUTO_POSITION: int = -1
 
 
 class DeviceRegistry:
-    """Gerencia registro de Pico W's com thread safety via asyncio.Lock."""
+    """Gerencia registro de Pico W's com thread safety via asyncio.Lock.
+
+    Auto-discovery: devices com position=-1 recebem posicao automatica
+    por ordem de chegada. Devices com posicao fixa (>=0) sao respeitados.
+    """
 
     def __init__(self) -> None:
         self._devices: dict[str, dict[str, str | int]] = {}
         self._lock: asyncio.Lock = asyncio.Lock()
 
-    async def register(self, device_id: str, name: str, ip: str, position: int = 0) -> None:
-        """Registra ou atualiza dispositivo."""
+    def _next_auto_position(self) -> int:
+        """Retorna proxima posicao disponivel (max + 1 das posicoes existentes)."""
+        if not self._devices:
+            return 0
+        used: list[int] = [int(d["position"]) for d in self._devices.values()]
+        return max(used) + 1
+
+    async def register(self, device_id: str, name: str, ip: str, position: int = 0) -> int:
+        """Registra ou atualiza dispositivo. Retorna posicao atribuida.
+
+        Se position == -1 (AUTO_POSITION):
+        - Device ja registrado: mantem posicao anterior
+        - Device novo: atribui proxima posicao disponivel
+        """
         async with self._lock:
             now_str: str = local_now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -28,19 +45,49 @@ class DeviceRegistry:
                 self._devices[device_id]["last_seen"] = now_str
                 self._devices[device_id]["ip"] = ip
                 self._devices[device_id]["name"] = name
-                self._devices[device_id]["position"] = position
                 self._devices[device_id]["fetch_count"] = (
                     int(self._devices[device_id]["fetch_count"]) + 1
                 )
-            else:
-                self._devices[device_id] = {
-                    "name": name,
-                    "ip": ip,
-                    "position": position,
-                    "last_seen": now_str,
-                    "fetch_count": 1,
-                }
-                logger.info("New device: %s (%s) pos=%d from %s", name, device_id, position, ip)
+                # Auto: mantem posicao anterior. Fixo: atualiza.
+                if position != AUTO_POSITION:
+                    self._devices[device_id]["position"] = position
+                return int(self._devices[device_id]["position"])
+
+            # Novo device
+            assigned: int = self._next_auto_position() if position == AUTO_POSITION else position
+            self._devices[device_id] = {
+                "name": name,
+                "ip": ip,
+                "position": assigned,
+                "last_seen": now_str,
+                "fetch_count": 1,
+            }
+            logger.info(
+                "New device: %s (%s) pos=%d from %s%s",
+                name,
+                device_id,
+                assigned,
+                ip,
+                " (auto-assigned)" if position == AUTO_POSITION else "",
+            )
+            return assigned
+
+    async def get_position(self, device_id: str) -> int | None:
+        """Retorna posicao do device ou None se nao registrado."""
+        async with self._lock:
+            dev = self._devices.get(device_id)
+            return int(dev["position"]) if dev else None
+
+    async def reorder(self, device_ids: list[str]) -> dict[str, int]:
+        """Reatribui posicoes na ordem fornecida. Retorna mapa mac->posicao."""
+        async with self._lock:
+            result: dict[str, int] = {}
+            for idx, did in enumerate(device_ids):
+                if did in self._devices:
+                    self._devices[did]["position"] = idx
+                    result[did] = idx
+            logger.info("Devices reordered: %s", result)
+            return result
 
     async def get_device(self, device_id: str) -> dict[str, str | int] | None:
         """Retorna info do device ou None."""
