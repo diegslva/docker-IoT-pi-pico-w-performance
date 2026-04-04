@@ -23,8 +23,8 @@ def draw_scrolling_text(
     bbox = draw.textbbox((0, 0), text, font=font)
     text_width: int = bbox[2] - bbox[0]
 
-    # Spacing entre repeticoes = largura de 1 TV
-    spacing: int = FRAME_WIDTH
+    # Spacing entre repeticoes = largura de 2 TVs (gap generoso)
+    spacing: int = FRAME_WIDTH * 2
     cycle: int = text_width + spacing
 
     # Posicao base

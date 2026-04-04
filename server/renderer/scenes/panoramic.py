@@ -225,45 +225,33 @@ class PanoramicScene(SceneRenderer):
 
         font_title = get_font_bold(28)
         font_info = get_font_bold(18)
+        font_motiv = get_font_bold(14)
 
         tick: float = ctx.hour * 3600 + ctx.minute * 60 + ctx.second
         offset_px: int = int(tick * self.SCROLL_SPEED)
 
-        # Titulo
+        # Todos os textos com mesmo comprimento pra mesmo cycle visual.
+        # Pad com espacos pra igualar largura percebida.
+        title_str: str = "Vitoria Sports - ES"
+        clock_str: str = f"Vitoria Sports  -  {ctx.timestamp}  -  ES"
+        motiv_str: str = "Vitoria Sports  -  Bora treinar!  -  ES"
+
         draw_scrolling_text(
-            draw,
-            "Vitoria Sports - ES",
-            y=10,
-            fill=(255, 220, 100),
-            shadow=(20, 5, 0),
-            font=font_title,
-            canvas_width=W,
-            offset_px=offset_px,
+            draw, title_str, y=10,
+            fill=(255, 220, 100), shadow=(20, 5, 0),
+            font=font_title, canvas_width=W, offset_px=offset_px,
         )
 
-        # Horario
         draw_scrolling_text(
-            draw,
-            ctx.timestamp,
-            y=193,
-            fill=(255, 255, 200),
-            shadow=(20, 5, 0),
-            font=font_info,
-            canvas_width=W,
-            offset_px=offset_px,
+            draw, clock_str, y=193,
+            fill=(255, 255, 200), shadow=(20, 5, 0),
+            font=font_info, canvas_width=W, offset_px=offset_px,
         )
 
-        # Motivacional
-        msg: str = MESSAGES[ctx.frame_index % len(MESSAGES)]
         draw_scrolling_text(
-            draw,
-            msg,
-            y=218,
-            fill=(0, 255, 150),
-            shadow=(20, 5, 0),
-            font=font_info,
-            canvas_width=W,
-            offset_px=offset_px,
+            draw, motiv_str, y=220,
+            fill=(0, 255, 150), shadow=(20, 5, 0),
+            font=font_motiv, canvas_width=W, offset_px=offset_px,
         )
 
         x_start: int = ctx.position * FRAME_WIDTH
