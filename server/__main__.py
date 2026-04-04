@@ -271,6 +271,7 @@ def main() -> None:
             host=SERVER_HOST,
             port=SERVER_PORT,
             reload=True,
+            reload_excludes=["__pycache__", "*.pyc", ".run", ".git", "monitoring"],
         )
     finally:
         _remove_pid()
