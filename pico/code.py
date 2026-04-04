@@ -22,7 +22,7 @@ gc.collect()
 
 SERVER_IP = os.getenv("DISPLAY_SERVER_IP", "192.168.86.21")
 SERVER_PORT = int(os.getenv("DISPLAY_SERVER_PORT", "8000"))
-FETCH_INTERVAL = int(os.getenv("FETCH_INTERVAL", "10"))
+FETCH_INTERVAL = float(os.getenv("FETCH_INTERVAL", "10"))
 DEVICE_NAME = os.getenv("DEVICE_NAME", "unnamed")
 DEVICE_POSITION = os.getenv("DEVICE_POSITION", "0")
 FRAME_SIZE = 76800  # 320 * 240 * 1 byte (RGB332)

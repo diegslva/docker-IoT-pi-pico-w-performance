@@ -445,10 +445,10 @@ def render_panoramic_frame(
     draw: ImageDraw.ImageDraw = ImageDraw.Draw(img)
     W: int = img.width
 
-    font_title: ImageFont.FreeTypeFont | ImageFont.ImageFont = _get_font_bold(36)
+    font_title: ImageFont.FreeTypeFont | ImageFont.ImageFont = _get_font_bold(28)
     font_sub: ImageFont.FreeTypeFont | ImageFont.ImageFont = _get_font(18)
     font_clock: ImageFont.FreeTypeFont | ImageFont.ImageFont = _get_font_bold(20)
-    font_msg: ImageFont.FreeTypeFont | ImageFont.ImageFont = _get_font_bold(18)
+    font_msg: ImageFont.FreeTypeFont | ImageFont.ImageFont = _get_font_bold(20)
 
     # Time-based tick for smooth scrolling (seconds since midnight)
     tick: float = hour * 3600 + minute * 60 + second
