@@ -4,9 +4,14 @@ Resiliencia:
 - Reconexao Wi-Fi automatica se cair
 - Retry com exponential backoff se servidor nao responder
 - Watchdog via supervisor loop
+
+Auto-discovery:
+- DEVICE_POSITION = "auto" → solicita posicao ao servidor no boot
+- DEVICE_POSITION = "3" → usa posicao fixa (backward compatible)
 """
 
 import gc
+import json
 import os
 import time
 
@@ -24,7 +29,7 @@ SERVER_IP = os.getenv("DISPLAY_SERVER_IP", "192.168.86.21")
 SERVER_PORT = int(os.getenv("DISPLAY_SERVER_PORT", "8000"))
 FETCH_INTERVAL = float(os.getenv("FETCH_INTERVAL", "10"))
 DEVICE_NAME = os.getenv("DEVICE_NAME", "unnamed")
-DEVICE_POSITION = os.getenv("DEVICE_POSITION", "0")
+DEVICE_POSITION_RAW = os.getenv("DEVICE_POSITION", "auto")
 FRAME_SIZE = 76800  # 320 * 240 * 1 byte (RGB332)
 MAX_BACKOFF = 60  # max retry interval in seconds
 MAX_CONSECUTIVE_ERRORS = 30  # hard reset after this many failures
@@ -49,14 +54,6 @@ fbuf = memoryview(fb)
 pool = socketpool.SocketPool(wifi.radio)
 gc.collect()
 
-print("Pico W Frame Client")
-print("ID:", DEVICE_ID)
-print("Name:", DEVICE_NAME)
-print("Position:", DEVICE_POSITION)
-print("IP:", wifi.radio.ipv4_address)
-print("Server:", SERVER_IP, ":", SERVER_PORT)
-print("RAM:", gc.mem_free())
-
 
 def ensure_wifi() -> bool:
     """Garante que o Wi-Fi esta conectado. Retorna True se OK."""
@@ -79,6 +76,76 @@ def ensure_wifi() -> bool:
 
     print("Wi-Fi reconnection failed after 5 attempts")
     return False
+
+
+def http_get_json(path: str) -> dict:
+    """HTTP GET simples que retorna JSON parsed. Raise em caso de erro."""
+    s = pool.socket(pool.AF_INET, pool.SOCK_STREAM)
+    s.setblocking(True)
+    try:
+        s.connect((SERVER_IP, SERVER_PORT))
+        request = ("GET " + path + " HTTP/1.0\r\nHost: x\r\n\r\n").encode()
+        s.send(request)
+
+        # Read full response
+        data = b""
+        buf = bytearray(512)
+        while True:
+            n = s.recv_into(buf)
+            if n == 0:
+                break
+            data += buf[:n]
+
+        # Split headers and body
+        parts = data.split(b"\r\n\r\n", 1)
+        if len(parts) < 2:
+            raise ValueError("Invalid HTTP response")
+        return json.loads(parts[1])
+    finally:
+        s.close()
+
+
+def discover_position() -> str:
+    """Solicita posicao ao servidor via /api/position. Retorna string da posicao."""
+    device_ip = str(wifi.radio.ipv4_address)
+    path = (
+        "/api/position?id=" + DEVICE_ID
+        + "&name=" + DEVICE_NAME
+        + "&ip=" + device_ip
+    )
+    for attempt in range(5):
+        try:
+            result = http_get_json(path)
+            pos = str(result["position"])
+            auto = result.get("auto_assigned", True)
+            print("Position assigned:", pos, "(auto)" if auto else "(kept)")
+            return pos
+        except Exception as e:
+            print("Position discovery attempt", attempt + 1, "failed:", e)
+            time.sleep(2)
+
+    print("Position discovery failed, using fallback 0")
+    return "0"
+
+
+# --- Resolve position ---
+if DEVICE_POSITION_RAW.lower() in ("auto", ""):
+    print("Auto-discovery mode, requesting position from server...")
+    if ensure_wifi():
+        DEVICE_POSITION = discover_position()
+    else:
+        DEVICE_POSITION = "0"
+        print("No Wi-Fi for discovery, using fallback position 0")
+else:
+    DEVICE_POSITION = DEVICE_POSITION_RAW
+
+print("Pico W Frame Client")
+print("ID:", DEVICE_ID)
+print("Name:", DEVICE_NAME)
+print("Position:", DEVICE_POSITION)
+print("IP:", wifi.radio.ipv4_address)
+print("Server:", SERVER_IP, ":", SERVER_PORT)
+print("RAM:", gc.mem_free())
 
 
 def build_request() -> bytes:

@@ -37,3 +37,18 @@ class HealthResponse(BaseModel):
     status: str
     devices_online: int
     active_effect: str
+
+
+class PositionResponse(BaseModel):
+    device_id: str
+    position: int
+    auto_assigned: bool
+
+
+class ReorderRequest(BaseModel):
+    order: list[str]
+
+
+class ReorderResponse(BaseModel):
+    status: str
+    positions: dict[str, int]
