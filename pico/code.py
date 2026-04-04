@@ -1,17 +1,17 @@
 """Pico W framebuffer client — recebe frames do servidor e escreve direto no DVI.
 
+Modos de operacao:
+1. TCP Streaming (default): conexao persistente, servidor empurra frames (~15 FPS)
+2. HTTP Polling (fallback): GET /api/frame a cada FETCH_INTERVAL
+
 Resiliencia:
 - Reconexao Wi-Fi automatica se cair
-- Retry com exponential backoff se servidor nao responder
-- Watchdog via supervisor loop
+- Fallback automatico de streaming pra HTTP apos 3 falhas
+- Watchdog via hard reset apos MAX_CONSECUTIVE_ERRORS
 
 Auto-discovery:
-- DEVICE_POSITION = "auto" → solicita posicao ao servidor no boot
-- DEVICE_POSITION = "3" → usa posicao fixa (backward compatible)
-
-Color depth:
-- COLOR_DEPTH = "16" → RGB565 (65K cores, 153600 bytes/frame)
-- COLOR_DEPTH = "8" → RGB332 (256 cores, 76800 bytes/frame)
+- DEVICE_POSITION = "auto" → solicita posicao ao servidor
+- DEVICE_POSITION = "3" → usa posicao fixa
 """
 
 import gc
@@ -31,14 +31,16 @@ gc.collect()
 
 SERVER_IP = os.getenv("DISPLAY_SERVER_IP", "192.168.86.21")
 SERVER_PORT = int(os.getenv("DISPLAY_SERVER_PORT", "8000"))
-FETCH_INTERVAL = float(os.getenv("FETCH_INTERVAL", "10"))
+STREAM_PORT = int(os.getenv("STREAM_PORT", "8001"))
+FETCH_INTERVAL = float(os.getenv("FETCH_INTERVAL", "0.5"))
 DEVICE_NAME = os.getenv("DEVICE_NAME", "unnamed")
 DEVICE_POSITION_RAW = os.getenv("DEVICE_POSITION", "auto")
 COLOR_DEPTH = int(os.getenv("COLOR_DEPTH", "8"))
 BYTES_PER_PIXEL = COLOR_DEPTH // 8
 FRAME_SIZE = 320 * 240 * BYTES_PER_PIXEL
-MAX_BACKOFF = 60  # max retry interval in seconds
-MAX_CONSECUTIVE_ERRORS = 30  # hard reset after this many failures
+MAX_BACKOFF = 60
+MAX_CONSECUTIVE_ERRORS = 30
+MAX_STREAM_FAILURES = 3
 
 # --- Device identity ---
 mac_bytes = wifi.radio.mac_address
@@ -85,7 +87,7 @@ def ensure_wifi() -> bool:
 
 
 def http_get_json(path: str) -> dict:
-    """HTTP GET simples que retorna JSON parsed. Raise em caso de erro."""
+    """HTTP GET simples que retorna JSON parsed."""
     s = pool.socket(pool.AF_INET, pool.SOCK_STREAM)
     s.setblocking(True)
     try:
@@ -93,7 +95,6 @@ def http_get_json(path: str) -> dict:
         request = ("GET " + path + " HTTP/1.0\r\nHost: x\r\n\r\n").encode()
         s.send(request)
 
-        # Read full response
         data = b""
         buf = bytearray(512)
         while True:
@@ -102,7 +103,6 @@ def http_get_json(path: str) -> dict:
                 break
             data += buf[:n]
 
-        # Split headers and body
         parts = data.split(b"\r\n\r\n", 1)
         if len(parts) < 2:
             raise ValueError("Invalid HTTP response")
@@ -112,7 +112,7 @@ def http_get_json(path: str) -> dict:
 
 
 def discover_position() -> str:
-    """Solicita posicao ao servidor via /api/position. Retorna string da posicao."""
+    """Solicita posicao ao servidor via /api/position."""
     device_ip = str(wifi.radio.ipv4_address)
     path = (
         "/api/position?id=" + DEVICE_ID
@@ -151,9 +151,76 @@ print("Name:", DEVICE_NAME)
 print("Position:", DEVICE_POSITION)
 print("IP:", wifi.radio.ipv4_address)
 print("Server:", SERVER_IP, ":", SERVER_PORT)
+print("Stream port:", STREAM_PORT)
+print("Color depth:", COLOR_DEPTH)
+print("Frame size:", FRAME_SIZE)
 print("RAM:", gc.mem_free())
 
 
+# --- TCP Streaming ---
+def recv_exact(sock, buf, size):
+    """Recebe exatamente size bytes no buffer. Retorna True se OK."""
+    received = 0
+    while received < size:
+        remaining = size - received
+        n = sock.recv_into(buf[received:], min(1024, remaining))
+        if n == 0:
+            return False
+        received += n
+    return True
+
+
+def stream_frames() -> int:
+    """Conecta via TCP streaming e recebe frames em loop.
+
+    Retorna numero de frames recebidos antes de desconectar.
+    """
+    gc.collect()
+    s = pool.socket(pool.AF_INET, pool.SOCK_STREAM)
+    s.setblocking(True)
+    frames = 0
+
+    try:
+        s.connect((SERVER_IP, STREAM_PORT))
+
+        # Handshake: enviar registro JSON
+        handshake = json.dumps({
+            "id": DEVICE_ID,
+            "name": DEVICE_NAME,
+            "ip": str(wifi.radio.ipv4_address),
+            "pos": int(DEVICE_POSITION),
+        }) + "\n"
+        s.send(handshake.encode())
+
+        # Ler resposta do servidor
+        resp_buf = bytearray(256)
+        n = s.recv_into(resp_buf)
+        resp_line = resp_buf[:n].decode().strip()
+        resp = json.loads(resp_line)
+        frame_size = resp.get("frame_size", FRAME_SIZE)
+
+        print("Stream connected | pos:", resp.get("position"), "| frame:", frame_size)
+
+        # Loop de streaming — receber frames direto no framebuffer
+        while True:
+            if not recv_exact(s, fbuf, frame_size):
+                print("Stream ended (server closed)")
+                break
+            frames += 1
+            if frames % 100 == 0:
+                gc.collect()
+                print("Stream:", frames, "frames | RAM:", gc.mem_free())
+
+    except Exception as e:
+        print("Stream error:", e)
+    finally:
+        s.close()
+        gc.collect()
+
+    return frames
+
+
+# --- HTTP Polling (fallback) ---
 def build_request() -> bytes:
     """Constroi request HTTP com identidade do device."""
     device_ip = str(wifi.radio.ipv4_address)
@@ -168,7 +235,7 @@ def build_request() -> bytes:
 
 
 def fetch_frame() -> bool:
-    """Busca frame do servidor e escreve direto no framebuffer via streaming."""
+    """Busca frame via HTTP e escreve no framebuffer."""
     gc.collect()
     s = pool.socket(pool.AF_INET, pool.SOCK_STREAM)
     s.setblocking(True)
@@ -176,14 +243,12 @@ def fetch_frame() -> bool:
         s.connect((SERVER_IP, SERVER_PORT))
         s.send(build_request())
 
-        # Read HTTP headers
         header = b""
         while b"\r\n\r\n" not in header:
             chunk = bytearray(1)
             s.recv_into(chunk)
             header += chunk
 
-        # Stream body directly into framebuffer
         written = 0
         chunk = bytearray(1024)
         while written < FRAME_SIZE:
@@ -199,9 +264,11 @@ def fetch_frame() -> bool:
         s.close()
 
 
-# --- Main loop with resilience ---
+# --- Main loop ---
+stream_failures: int = 0
+use_streaming: bool = True
 error_count: int = 0
-backoff: int = FETCH_INTERVAL
+backoff: float = FETCH_INTERVAL
 
 while True:
     try:
@@ -215,27 +282,44 @@ while True:
                 microcontroller.reset()
             continue
 
-        ok = fetch_frame()
-        gc.collect()
-
-        if ok:
-            print("Frame OK | RAM:", gc.mem_free())
-            error_count = 0
-            backoff = FETCH_INTERVAL
+        if use_streaming:
+            print("Connecting to stream server...")
+            frames = stream_frames()
+            if frames > 0:
+                stream_failures = 0
+                error_count = 0
+                print("Stream session ended after", frames, "frames")
+            else:
+                stream_failures += 1
+                error_count += 1
+                print("Stream failed (", stream_failures, "/", MAX_STREAM_FAILURES, ")")
+                if stream_failures >= MAX_STREAM_FAILURES:
+                    print("Falling back to HTTP polling")
+                    use_streaming = False
+            time.sleep(2)
         else:
-            print("Frame incomplete")
-            error_count += 1
+            # HTTP polling fallback
+            ok = fetch_frame()
+            gc.collect()
+
+            if ok:
+                error_count = 0
+                backoff = FETCH_INTERVAL
+            else:
+                print("Frame incomplete")
+                error_count += 1
+
+            if error_count > 0:
+                backoff = min(FETCH_INTERVAL * (2 ** min(error_count, 4)), MAX_BACKOFF)
+                print("Backoff:", backoff, "s | Errors:", error_count)
+
+            time.sleep(backoff if error_count > 0 else FETCH_INTERVAL)
 
     except Exception as e:
         print("Err:", e)
         error_count += 1
         gc.collect()
 
-    if error_count > 0:
-        backoff = min(FETCH_INTERVAL * (2 ** min(error_count, 4)), MAX_BACKOFF)
-        print("Backoff:", backoff, "s | Errors:", error_count)
-        if error_count >= MAX_CONSECUTIVE_ERRORS:
-            print("Too many errors, hard reset")
-            microcontroller.reset()
-
-    time.sleep(backoff if error_count > 0 else FETCH_INTERVAL)
+    if error_count >= MAX_CONSECUTIVE_ERRORS:
+        print("Too many errors, hard reset")
+        microcontroller.reset()

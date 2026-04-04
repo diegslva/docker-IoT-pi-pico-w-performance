@@ -146,6 +146,7 @@ FETCH_INTERVAL = "0.5"
 DEVICE_NAME = "$deviceName"
 DEVICE_POSITION = "auto"
 COLOR_DEPTH = "8"
+STREAM_PORT = "8001"
 "@
         Set-Content -Path "${dest}settings.toml" -Value $settingsContent -NoNewline
         Write-Host "  settings.toml generated" -ForegroundColor Green
@@ -179,6 +180,21 @@ function Set-Firewall {
         -Profile Private,Domain | Out-Null
 
     Write-Host "Firewall rule created: TCP $port (Private,Domain)" -ForegroundColor Green
+
+    # Stream server port
+    $streamPort = "8001"
+    $streamRuleName = "PicoDV Stream Server"
+    $existingStream = Get-NetFirewallRule -DisplayName $streamRuleName 2>$null
+    if (-not $existingStream) {
+        New-NetFirewallRule `
+            -DisplayName $streamRuleName `
+            -Direction Inbound `
+            -Protocol TCP `
+            -LocalPort $streamPort `
+            -Action Allow `
+            -Profile Private,Domain | Out-Null
+        Write-Host "Firewall rule created: TCP $streamPort (Private,Domain)" -ForegroundColor Green
+    }
 }
 
 switch ($Command) {
