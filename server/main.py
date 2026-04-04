@@ -21,7 +21,13 @@ from fastapi import FastAPI, Query, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-from server.renderer import image_to_rgb332_direct, render_crypto_frame, FRAME_WIDTH, FRAME_HEIGHT
+from server.renderer import (
+    FRAME_HEIGHT,
+    FRAME_WIDTH,
+    image_to_rgb332_direct,
+    render_crypto_frame,
+    render_vitoria_sports_frame,
+)
 
 
 def check_port_available(host: str, port: int) -> bool:
@@ -181,12 +187,12 @@ async def display_frame(
     if _custom_frame is not None:
         return Response(content=_custom_frame, media_type="application/octet-stream")
 
-    data: DisplayData = await _get_display_data()
-    frame: bytes = render_crypto_frame(
-        btc_price=data.btc,
-        eth_price=data.eth,
-        timestamp=data.ts,
-    )
+    # Default: Vitoria Sports com horario e mensagem rotativa
+    local_tz: timezone = timezone(timedelta(hours=TZ_OFFSET_HOURS))
+    ts: str = datetime.now(tz=local_tz).strftime("%H:%M:%S")
+    device_info: dict[str, str | int] | None = _devices.get(id)
+    fetch_count: int = int(device_info["fetch_count"]) if device_info else 0
+    frame: bytes = render_vitoria_sports_frame(timestamp=ts, frame_index=fetch_count)
     return Response(content=frame, media_type="application/octet-stream")
 
 
