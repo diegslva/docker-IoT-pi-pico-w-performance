@@ -32,6 +32,7 @@ logger: logging.Logger = logging.getLogger("server.main")
 
 SERVER_HOST: str = os.getenv("SERVER_HOST", "0.0.0.0")
 SERVER_PORT: int = int(os.getenv("SERVER_PORT", "8000"))
+STREAM_PORT: int = int(os.getenv("STREAM_PORT", "8001"))
 
 # --- Paths ---
 RUN_DIR: Path = Path(__file__).parent.parent / ".run"
@@ -249,9 +250,28 @@ def ensure_safe_startup(host: str, port: int) -> None:
         sys.exit(1)
 
 
+def _free_stale_port(port: int) -> None:
+    """Libera porta se ocupada por processo nosso (best-effort, nao aborta)."""
+    if _check_port_available("0.0.0.0", port):
+        return
+    port_pid: int | None = _find_pid_on_port(port)
+    our_pid: int | None = _read_pid()
+    if port_pid and our_pid and (our_pid == port_pid or _is_child_of(port_pid, our_pid)):
+        logger.warning("Freeing stale port %d (PID %d from previous instance)", port, port_pid)
+        _kill_process(port_pid)
+        time.sleep(1)
+    elif port_pid:
+        logger.warning(
+            "Port %d in use by PID %d (not ours), stream server will retry", port, port_pid
+        )
+
+
 def main() -> None:
-    # Guard 1: health probe + porta + PID
+    # Guard 1: health probe + porta + PID (porta principal)
     ensure_safe_startup(SERVER_HOST, SERVER_PORT)
+
+    # Guard 1b: liberar porta de streaming se stale
+    _free_stale_port(STREAM_PORT)
 
     # Guard 2: lock file exclusivo
     lock_fd: int | None = _acquire_lock()
