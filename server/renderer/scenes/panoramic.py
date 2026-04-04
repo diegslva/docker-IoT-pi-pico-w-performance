@@ -227,7 +227,9 @@ class PanoramicScene(SceneRenderer):
         font_info = get_font_bold(18)
         font_motiv = get_font_bold(14)
 
-        tick: float = ctx.hour * 3600 + ctx.minute * 60 + ctx.second
+        tick: float = (
+            ctx.hour * 3600 + ctx.minute * 60 + ctx.second + ctx.now.microsecond / 1_000_000
+        )
         offset_px: int = int(tick * self.SCROLL_SPEED)
 
         # Todos os textos com mesmo comprimento pra mesmo cycle visual.

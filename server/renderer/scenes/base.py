@@ -28,5 +28,5 @@ class SceneRenderer(ABC):
 
     @abstractmethod
     def render(self, ctx: RenderContext) -> bytes:
-        """Renderiza frame RGB332 (76800 bytes) para a posicao do device."""
+        """Renderiza frame para a posicao do device."""
         ...

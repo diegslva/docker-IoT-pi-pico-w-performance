@@ -164,28 +164,29 @@ function Set-Firewall {
         if ($p) { $port = $p }
     }
 
+    # HTTP server port
     $ruleName = "PicoDV Display Server"
     $existing = Get-NetFirewallRule -DisplayName $ruleName 2>$null
     if ($existing) {
         Write-Host "Firewall rule '$ruleName' already exists." -ForegroundColor Yellow
-        return
+    } else {
+        New-NetFirewallRule `
+            -DisplayName $ruleName `
+            -Direction Inbound `
+            -Protocol TCP `
+            -LocalPort $port `
+            -Action Allow `
+            -Profile Private,Domain | Out-Null
+        Write-Host "Firewall rule created: TCP $port (Private,Domain)" -ForegroundColor Green
     }
-
-    New-NetFirewallRule `
-        -DisplayName $ruleName `
-        -Direction Inbound `
-        -Protocol TCP `
-        -LocalPort $port `
-        -Action Allow `
-        -Profile Private,Domain | Out-Null
-
-    Write-Host "Firewall rule created: TCP $port (Private,Domain)" -ForegroundColor Green
 
     # Stream server port
     $streamPort = "8001"
     $streamRuleName = "PicoDV Stream Server"
     $existingStream = Get-NetFirewallRule -DisplayName $streamRuleName 2>$null
-    if (-not $existingStream) {
+    if ($existingStream) {
+        Write-Host "Firewall rule '$streamRuleName' already exists." -ForegroundColor Yellow
+    } else {
         New-NetFirewallRule `
             -DisplayName $streamRuleName `
             -Direction Inbound `
