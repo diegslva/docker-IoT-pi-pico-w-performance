@@ -11,10 +11,12 @@ Seguranca: nunca mata processos de terceiros. Se a porta esta ocupada por algo
 que nao e nosso, aborta com mensagem clara.
 """
 
+import atexit
 import json
 import logging
 import msvcrt
 import os
+import signal
 import socket
 import subprocess
 import sys
@@ -266,6 +268,13 @@ def _free_stale_port(port: int) -> None:
         )
 
 
+def _cleanup(lock_fd: int) -> None:
+    """Cleanup gracioso: PID file + lock."""
+    _remove_pid()
+    _release_lock(lock_fd)
+    logger.info("Lock released, PID file removed — shutdown complete")
+
+
 def main() -> None:
     # Guard 1: health probe + porta + PID (porta principal)
     ensure_safe_startup(SERVER_HOST, SERVER_PORT)
@@ -285,6 +294,18 @@ def main() -> None:
 
     _write_pid()
 
+    # Cleanup em qualquer cenario de saida (Ctrl+C, kill, crash, atexit)
+    atexit.register(_cleanup, lock_fd)
+
+    def _signal_handler(signum: int, _frame: object) -> None:
+        signame: str = signal.Signals(signum).name
+        logger.info("Received %s — shutting down gracefully", signame)
+        _cleanup(lock_fd)
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, _signal_handler)
+    signal.signal(signal.SIGTERM, _signal_handler)
+
     try:
         uvicorn.run(
             "server.app:app",
@@ -294,9 +315,7 @@ def main() -> None:
             reload_excludes=["__pycache__", "*.pyc", ".run", ".git", "monitoring"],
         )
     finally:
-        _remove_pid()
-        _release_lock(lock_fd)
-        logger.info("Lock released, PID file removed")
+        _cleanup(lock_fd)
 
 
 if __name__ == "__main__":
