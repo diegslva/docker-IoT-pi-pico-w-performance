@@ -2,6 +2,8 @@
 
 from PIL import ImageDraw, ImageFont
 
+from server.renderer.rgb332 import FRAME_WIDTH
+
 
 def draw_scrolling_text(
     draw: ImageDraw.ImageDraw,
@@ -13,27 +15,25 @@ def draw_scrolling_text(
     canvas_width: int,
     offset_px: int,
 ) -> None:
-    """Desenha texto scrollando da direita pra esquerda com wrap-around.
+    """Desenha texto scrollando da direita pra esquerda com repeticao continua.
 
-    Args:
-        draw: ImageDraw instance
-        text: texto a renderizar
-        y: posicao vertical
-        fill: cor do texto
-        shadow: cor da sombra
-        font: fonte
-        canvas_width: largura total do canvas (todas as TVs)
-        offset_px: deslocamento absoluto em pixels (compartilhado por todos os textos)
+    O texto se repete com spacing fixo de 1 TV (320px) entre copias,
+    garantindo que sempre ha texto visivel em cada display.
     """
     bbox = draw.textbbox((0, 0), text, font=font)
     text_width: int = bbox[2] - bbox[0]
-    spacing: int = canvas_width
+
+    # Spacing entre repeticoes = largura de 1 TV
+    spacing: int = FRAME_WIDTH
     cycle: int = text_width + spacing
 
-    x: int = canvas_width - (offset_px % cycle)
+    # Posicao base
+    base_x: int = -(offset_px % cycle)
 
-    for shift in [-cycle, 0, cycle]:
-        draw_x: int = x + shift
-        if -text_width <= draw_x <= canvas_width:
-            draw.text((draw_x + 2, y + 2), text, fill=shadow, font=font, anchor="lt")
-            draw.text((draw_x, y), text, fill=fill, font=font, anchor="lt")
+    # Desenha repeticoes suficientes pra cobrir todo o canvas
+    x: int = base_x
+    while x < canvas_width:
+        if x + text_width > 0:
+            draw.text((x + 2, y + 2), text, fill=shadow, font=font, anchor="lt")
+            draw.text((x, y), text, fill=fill, font=font, anchor="lt")
+        x += cycle
