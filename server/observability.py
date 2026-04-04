@@ -321,6 +321,16 @@ server_start_timestamp = Gauge(
     "Unix timestamp when the server started",
 )
 
+stream_connections_active = Gauge(
+    "stream_connections_active",
+    "Number of active TCP streaming connections",
+)
+
+stream_frames_pushed_total = Counter(
+    "stream_frames_pushed_total",
+    "Total frames pushed via TCP streaming",
+)
+
 _ALL_METRICS: list[Counter | Gauge | Histogram] = [
     http_request_duration,
     http_requests_total,
@@ -333,6 +343,8 @@ _ALL_METRICS: list[Counter | Gauge | Histogram] = [
     crypto_cache_misses,
     effect_changes_total,
     server_start_timestamp,
+    stream_connections_active,
+    stream_frames_pushed_total,
 ]
 
 

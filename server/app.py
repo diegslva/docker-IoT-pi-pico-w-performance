@@ -9,6 +9,8 @@ Arquitetura:
 
 import logging
 import time
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from io import BytesIO
 
 from fastapi import FastAPI, Form, Query, UploadFile
@@ -38,22 +40,34 @@ from server.providers.crypto import get_display_data
 from server.renderer.config import FRAME_HEIGHT, FRAME_WIDTH, image_to_frame
 from server.renderer.effects import EFFECT_REGISTRY, EffectContext
 from server.renderer.scenes import SCENE_REGISTRY, RenderContext
+from server.stream_server import start_stream_server
 from server.tz_utils import local_now
 
 logger: logging.Logger = logging.getLogger("server")
 
+# --- Encapsulated state ---
+device_registry: DeviceRegistry = DeviceRegistry()
+effect_manager: EffectManager = EffectManager()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
+    """Lifecycle: inicia stream server no startup, cleanup no shutdown."""
+    server_start_timestamp.set(time.time())
+    stream_srv = await start_stream_server(device_registry, effect_manager)
+    yield
+    stream_srv.close()
+    await stream_srv.wait_closed()
+
+
 app = FastAPI(
     title="Pico W Display Server",
     version="0.4.0",
+    lifespan=lifespan,
 )
 
 # Observabilidade: logging estruturado + correlation ID + /metrics
 setup_observability(app)
-server_start_timestamp.set(time.time())
-
-# --- Encapsulated state ---
-device_registry: DeviceRegistry = DeviceRegistry()
-effect_manager: EffectManager = EffectManager()
 
 
 # --- Endpoints ---
