@@ -9,6 +9,7 @@ RGB332: 3 bits red (bits 7-5) + 3 bits green (bits 4-2) + 2 bits blue (bits 1-0)
 import logging
 import math
 
+import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 logger: logging.Logger = logging.getLogger("renderer")
@@ -19,22 +20,18 @@ FRAME_SIZE: int = FRAME_WIDTH * FRAME_HEIGHT  # 76800 bytes
 
 
 def image_to_rgb332_direct(img: Image.Image) -> bytes:
-    """Converte imagem Pillow para RGB332 sem dithering — cores puras."""
+    """Converte imagem Pillow para RGB332 via NumPy — ~100x mais rapido que loop Python."""
     img = img.convert("RGB")
     if img.size != (FRAME_WIDTH, FRAME_HEIGHT):
         img = img.resize((FRAME_WIDTH, FRAME_HEIGHT))
 
-    pixels: bytes = img.tobytes()
-    buf: bytearray = bytearray(FRAME_SIZE)
+    arr: np.ndarray = np.array(img, dtype=np.uint8)
+    r: np.ndarray = arr[:, :, 0] & 0xE0
+    g: np.ndarray = (arr[:, :, 1] >> 3) & 0x1C
+    b: np.ndarray = (arr[:, :, 2] >> 6) & 0x03
+    rgb332: np.ndarray = r | g | b
 
-    for i in range(FRAME_SIZE):
-        offset: int = i * 3
-        r: int = pixels[offset]
-        g: int = pixels[offset + 1]
-        b: int = pixels[offset + 2]
-        buf[i] = (r & 0xE0) | ((g >> 3) & 0x1C) | ((b >> 6) & 0x03)
-
-    return bytes(buf)
+    return rgb332.tobytes()
 
 
 def _get_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
@@ -243,7 +240,7 @@ def _sky_colors(hour: int, minute: int) -> tuple[tuple[int, int, int], tuple[int
 
 
 def _render_panoramic_base(total_positions: int, hour: int = 12, minute: int = 0) -> Image.Image:
-    """Renderiza panorama com ciclo dia/noite completo. Cacheado por minuto."""
+    """Renderiza panorama com ciclo dia/noite completo via NumPy. Cacheado por minuto."""
     global _panoramic_cache, _panoramic_cache_key
 
     cache_key: str = f"{total_positions}_{hour}_{minute}"
@@ -255,108 +252,100 @@ def _render_panoramic_base(total_positions: int, hour: int = 12, minute: int = 0
     h: float = hour + minute / 60
 
     sky_top, sky_bottom, is_night = _sky_colors(hour, minute)
+    arr: np.ndarray = np.zeros((H, W, 3), dtype=np.float32)
 
-    img: Image.Image = Image.new("RGB", (W, H), color=(0, 0, 0))
-    draw: ImageDraw.ImageDraw = ImageDraw.Draw(img)
-
-    # Sky gradient
-    for y in range(150):
-        t: float = y / 150
-        r: int = int(sky_top[0] + (sky_bottom[0] - sky_top[0]) * t)
-        g: int = int(sky_top[1] + (sky_bottom[1] - sky_top[1]) * t)
-        b: int = int(sky_top[2] + (sky_bottom[2] - sky_top[2]) * t)
-        draw.line([(0, y), (W - 1, y)], fill=(min(255, r), max(0, g), max(0, b)))
+    # --- Sky gradient (vectorized) ---
+    sky_t: np.ndarray = np.linspace(0, 1, 150).reshape(150, 1)
+    for c in range(3):
+        arr[:150, :, c] = sky_top[c] + (sky_bottom[c] - sky_top[c]) * sky_t
 
     if is_night:
-        # Moon
+        # Moon (vectorized)
         moon_x: int = int(W * 0.6)
         moon_y: int = 50
         moon_r: int = 25
-        for dy in range(-moon_r, moon_r + 1):
-            for dx in range(-moon_r, moon_r + 1):
-                dist: float = math.sqrt(dx * dx + dy * dy)
-                if dist <= moon_r:
-                    intensity: float = 1.0 - (dist / moon_r) * 0.2
-                    px: int = moon_x + dx
-                    py: int = moon_y + dy
-                    if 0 <= px < W and 0 <= py < H:
-                        img.putpixel((px, py), (
-                            min(255, int(220 * intensity)),
-                            min(255, int(220 * intensity)),
-                            min(255, int(240 * intensity)),
-                        ))
+        my, mx = np.ogrid[moon_y - moon_r:moon_y + moon_r + 1, moon_x - moon_r:moon_x + moon_r + 1]
+        dist: np.ndarray = np.sqrt((mx - moon_x) ** 2 + (my - moon_y) ** 2)
+        mask: np.ndarray = dist <= moon_r
+        intensity: np.ndarray = np.where(mask, 1.0 - (dist / moon_r) * 0.2, 0)
 
-        # Stars
+        y_start: int = max(0, moon_y - moon_r)
+        y_end: int = min(H, moon_y + moon_r + 1)
+        x_start: int = max(0, moon_x - moon_r)
+        x_end: int = min(W, moon_x + moon_r + 1)
+        sl_y: slice = slice(y_start - (moon_y - moon_r), y_end - (moon_y - moon_r))
+        sl_x: slice = slice(x_start - (moon_x - moon_r), x_end - (moon_x - moon_r))
+        moon_i: np.ndarray = intensity[sl_y, sl_x]
+        moon_mask: np.ndarray = mask[sl_y, sl_x]
+
+        arr[y_start:y_end, x_start:x_end, 0] = np.where(moon_mask, 220 * moon_i, arr[y_start:y_end, x_start:x_end, 0])
+        arr[y_start:y_end, x_start:x_end, 1] = np.where(moon_mask, 220 * moon_i, arr[y_start:y_end, x_start:x_end, 1])
+        arr[y_start:y_end, x_start:x_end, 2] = np.where(moon_mask, 240 * moon_i, arr[y_start:y_end, x_start:x_end, 2])
+
+        # Stars (deterministic)
         import random
-        rng: random.Random = random.Random(42)  # deterministic stars
+        rng: random.Random = random.Random(42)
         for _ in range(80 * total_positions):
             sx: int = rng.randint(0, W - 1)
             sy: int = rng.randint(0, 130)
             brightness: int = rng.randint(120, 255)
-            if img.getpixel((sx, sy))[0] < 30:
-                img.putpixel((sx, sy), (brightness, brightness, brightness))
+            if arr[sy, sx, 0] < 30:
+                arr[sy, sx] = [brightness, brightness, brightness]
     else:
-        # Sun position (5h-19h arc)
+        # Sun (vectorized)
         sun_frac: float = max(0.0, min(1.0, (h - 5) / 14))
         sun_x: int = int(W * 0.1 + (W * 0.8) * sun_frac)
         sun_y: int = int(130 - 80 * math.sin(sun_frac * math.pi))
-
-        # Sun
         radius: int = 40
-        for dy in range(-radius, radius + 1):
-            for dx in range(-radius, radius + 1):
-                dist = math.sqrt(dx * dx + dy * dy)
-                if dist <= radius:
-                    intensity = 1.0 - (dist / radius) * 0.3
-                    px = sun_x + dx
-                    py = sun_y + dy
-                    if 0 <= px < W and 0 <= py < 150:
-                        img.putpixel((px, py), (
-                            min(255, int(255 * intensity)),
-                            min(255, int(230 * intensity)),
-                            min(255, int(60 * intensity)),
-                        ))
 
-    # Ocean — darker at night
+        sy_s: int = max(0, sun_y - radius)
+        sy_e: int = min(150, sun_y + radius + 1)
+        sx_s: int = max(0, sun_x - radius)
+        sx_e: int = min(W, sun_x + radius + 1)
+
+        yy, xx = np.ogrid[sy_s:sy_e, sx_s:sx_e]
+        sun_dist: np.ndarray = np.sqrt((xx - sun_x) ** 2 + (yy - sun_y) ** 2)
+        sun_mask: np.ndarray = sun_dist <= radius
+        sun_i: np.ndarray = np.where(sun_mask, 1.0 - (sun_dist / radius) * 0.3, 0)
+
+        arr[sy_s:sy_e, sx_s:sx_e, 0] = np.where(sun_mask, np.minimum(255, 255 * sun_i), arr[sy_s:sy_e, sx_s:sx_e, 0])
+        arr[sy_s:sy_e, sx_s:sx_e, 1] = np.where(sun_mask, np.minimum(255, 230 * sun_i), arr[sy_s:sy_e, sx_s:sx_e, 1])
+        arr[sy_s:sy_e, sx_s:sx_e, 2] = np.where(sun_mask, np.minimum(255, 60 * sun_i), arr[sy_s:sy_e, sx_s:sx_e, 2])
+
+    # --- Ocean (vectorized) ---
     ocean_brightness: float = 0.2 if is_night else 1.0
-    for y in range(150, H):
-        depth: float = (y - 150) / (H - 150)
-        for x in range(W):
-            wave: float = math.sin(x * 0.03 + y * 0.08) * 12 + math.sin(x * 0.07 - y * 0.05) * 6
-            r = max(0, min(255, int((10 * (1 - depth) + wave * 0.3) * ocean_brightness)))
-            g = max(0, min(255, int((50 + 30 * (1 - depth) + wave * 0.5) * ocean_brightness)))
-            b = max(0, min(255, int((120 + 40 * (1 - depth) + wave) * ocean_brightness)))
-            img.putpixel((x, y), (r, g, b))
+    ocean_y: np.ndarray = np.arange(150, H).reshape(-1, 1).astype(np.float32)
+    ocean_x: np.ndarray = np.arange(W).reshape(1, -1).astype(np.float32)
+    depth: np.ndarray = (ocean_y - 150) / (H - 150)
+    wave: np.ndarray = np.sin(ocean_x * 0.03 + ocean_y * 0.08) * 12 + np.sin(ocean_x * 0.07 - ocean_y * 0.05) * 6
 
-    # Reflection (sun or moon)
-    if not is_night:
-        ref_cx: int = sun_x
+    arr[150:, :, 0] = np.clip((10 * (1 - depth) + wave * 0.3) * ocean_brightness, 0, 255)
+    arr[150:, :, 1] = np.clip((50 + 30 * (1 - depth) + wave * 0.5) * ocean_brightness, 0, 255)
+    arr[150:, :, 2] = np.clip((120 + 40 * (1 - depth) + wave) * ocean_brightness, 0, 255)
+
+    # --- Reflection (vectorized) ---
+    ref_cx: int = int(W * 0.6) if is_night else sun_x
+    ref_y: np.ndarray = np.arange(155, 220).reshape(-1, 1).astype(np.float32)
+    ref_x: np.ndarray = np.arange(W).reshape(1, -1).astype(np.float32)
+    spread: np.ndarray = (ref_y - 150) * 1.5
+    dx_from_center: np.ndarray = np.abs(ref_x - ref_cx)
+    ref_intensity: np.ndarray = 0.4 * np.maximum(0, 1 - dx_from_center / np.maximum(1, spread)) * (1 - (ref_y - 155) / 65)
+    wave_mod: np.ndarray = 0.5 + 0.5 * np.sin(ref_x * 0.1 + ref_y * 0.2)
+    ref_intensity *= wave_mod
+
+    if is_night:
+        arr[155:220, :, 0] = np.clip(arr[155:220, :, 0] + 100 * ref_intensity, 0, 255)
+        arr[155:220, :, 1] = np.clip(arr[155:220, :, 1] + 100 * ref_intensity, 0, 255)
+        arr[155:220, :, 2] = np.clip(arr[155:220, :, 2] + 120 * ref_intensity, 0, 255)
     else:
-        ref_cx = int(W * 0.6)
+        arr[155:220, :, 0] = np.clip(arr[155:220, :, 0] + 220 * ref_intensity, 0, 255)
+        arr[155:220, :, 1] = np.clip(arr[155:220, :, 1] + 170 * ref_intensity, 0, 255)
+        arr[155:220, :, 2] = np.clip(arr[155:220, :, 2] + 40 * ref_intensity, 0, 255)
 
-    for y in range(155, 220):
-        spread: float = (y - 150) * 1.5
-        for dx in range(int(-spread), int(spread) + 1):
-            x = ref_cx + dx
-            if 0 <= x < W:
-                ref: float = 0.4 * (1 - abs(dx) / max(1, spread)) * (1 - (y - 155) / 65)
-                wave_mod: float = 0.5 + 0.5 * math.sin(x * 0.1 + y * 0.2)
-                ref *= wave_mod
-                pr, pg, pb = img.getpixel((x, y))
-                if is_night:
-                    img.putpixel((x, y), (
-                        min(255, int(pr + 100 * ref)),
-                        min(255, int(pg + 100 * ref)),
-                        min(255, int(pb + 120 * ref)),
-                    ))
-                else:
-                    img.putpixel((x, y), (
-                        min(255, int(pr + 220 * ref)),
-                        min(255, int(pg + 170 * ref)),
-                        min(255, int(pb + 40 * ref)),
-                    ))
+    # Convert to PIL for palm trees (small loop, not worth vectorizing)
+    img: Image.Image = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8))
 
-    # Palm trees (silhouette — works day and night)
+    # --- Palm trees (silhouette) ---
     palm_positions: list[int] = [80]
     if total_positions >= 2:
         palm_positions.append(W - 100)
@@ -366,27 +355,28 @@ def _render_panoramic_base(total_positions: int, hour: int = 12, minute: int = 0
     tree_color: tuple[int, int, int] = (5, 3, 2) if is_night else (15, 10, 5)
     leaf_color: tuple[int, int, int] = (3, 2, 1) if is_night else (8, 6, 3)
 
+    draw: ImageDraw.ImageDraw = ImageDraw.Draw(img)
     for trunk_x in palm_positions:
+        # Trunk
         for y in range(75, 155):
             lean: int = int((155 - y) * 0.12)
-            for dx in range(-3, 4):
-                px = trunk_x + lean + dx
-                if 0 <= px < W:
-                    img.putpixel((px, y), tree_color)
+            draw.line([(trunk_x + lean - 3, y), (trunk_x + lean + 3, y)], fill=tree_color)
+        # Leaves
         leaf_bx: int = trunk_x + int(80 * 0.12)
         leaf_by: int = 75
         for a in [-40, -20, 0, 25, 50, 70, -55]:
             angle: float = math.radians(a)
+            points: list[tuple[int, int]] = []
             for t in range(45):
                 lx: int = int(leaf_bx + t * math.cos(angle))
                 ly: int = int(leaf_by - t * math.sin(angle) + t * t * 0.007)
-                for w in range(-2, 3):
-                    if 0 <= lx < W and 0 <= ly + w < H:
-                        img.putpixel((lx, ly + w), leaf_color)
+                points.append((lx, ly))
+            if len(points) >= 2:
+                draw.line(points, fill=leaf_color, width=4)
 
     _panoramic_cache = img.copy()
     _panoramic_cache_key = cache_key
-    logger.info("Panoramic rendered: %dx%d (%d displays) %d:%02d %s",
+    logger.info("Panoramic rendered (NumPy): %dx%d (%d displays) %d:%02d %s",
                 W, H, total_positions, hour, minute, "night" if is_night else "day")
     return img
 

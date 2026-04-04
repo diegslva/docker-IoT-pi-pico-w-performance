@@ -12,6 +12,7 @@ dependencies = [
     "httpx>=0.28.0",
     "pillow>=12.2.0",
     "python-multipart>=0.0.22",
+    "numpy>=2.4.4",
 ]
 
 [dependency-groups]
