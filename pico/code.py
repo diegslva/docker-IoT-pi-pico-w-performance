@@ -47,14 +47,27 @@ mac_bytes = wifi.radio.mac_address
 DEVICE_ID = ":".join(f"{b:02x}" for b in mac_bytes)
 
 # --- DVI Framebuffer ---
+# Pinout do Pimoroni Pico DV Demo Base:
+# CLK+/- = GP14/GP15, D0+/- = GP16/GP17, D1+/- = GP18/GP19, D2+/- = GP20/GP21
+# Usa GPIO numbers (funciona com qualquer build CircuitPython: generico ou Pimoroni)
 displayio.release_displays()
+
+# Detectar pin names: Pico DV build tem CKP, generico tem GP14
+_CKP = getattr(board, "CKP", board.GP14)
+_CKN = getattr(board, "CKN", board.GP15)
+_D0P = getattr(board, "D0P", board.GP16)
+_D0N = getattr(board, "D0N", board.GP17)
+_D1P = getattr(board, "D1P", board.GP18)
+_D1N = getattr(board, "D1N", board.GP19)
+_D2P = getattr(board, "D2P", board.GP20)
+_D2N = getattr(board, "D2N", board.GP21)
 
 fb = picodvi.Framebuffer(
     320, 240,
-    clk_dp=board.CKP, clk_dn=board.CKN,
-    red_dp=board.D0P, red_dn=board.D0N,
-    green_dp=board.D1P, green_dn=board.D1N,
-    blue_dp=board.D2P, blue_dn=board.D2N,
+    clk_dp=_CKP, clk_dn=_CKN,
+    red_dp=_D0P, red_dn=_D0N,
+    green_dp=_D1P, green_dn=_D1N,
+    blue_dp=_D2P, blue_dn=_D2N,
     color_depth=COLOR_DEPTH,
 )
 
