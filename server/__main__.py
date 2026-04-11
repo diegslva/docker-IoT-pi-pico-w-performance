@@ -281,7 +281,53 @@ def _cleanup(lock_fd: int) -> None:
     logger.info("Shutdown complete — PID file removed, lock released")
 
 
+def _check_wifi_network() -> None:
+    """Verifica se o computador esta na mesma rede Wi-Fi dos Pico W's."""
+    from pathlib import Path as _Path
+
+    env_file: _Path = _Path(__file__).parent.parent / ".env"
+    if not env_file.exists():
+        return
+
+    expected_ssid: str = ""
+    for line in env_file.read_text().splitlines():
+        if line.startswith("WIFI_SSID="):
+            expected_ssid = line.split("=", 1)[1].strip()
+            break
+
+    if not expected_ssid:
+        return
+
+    try:
+        result: subprocess.CompletedProcess[str] = subprocess.run(
+            ["netsh", "wlan", "show", "interfaces"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        current_ssid: str = ""
+        for line in result.stdout.splitlines():
+            if "SSID" in line and "BSSID" not in line:
+                current_ssid = line.split(":", 1)[1].strip()
+                break
+
+        if current_ssid and current_ssid != expected_ssid:
+            logger.warning(
+                "REDE WI-FI DIFERENTE! Conectado em '%s' mas Pico W's usam '%s'. "
+                "Devices nao vao encontrar o servidor.",
+                current_ssid,
+                expected_ssid,
+            )
+        elif current_ssid:
+            logger.info("Wi-Fi OK: '%s' (mesma rede dos Pico W's)", current_ssid)
+    except subprocess.TimeoutExpired, OSError:
+        logger.warning("Nao foi possivel verificar rede Wi-Fi")
+
+
 def main() -> None:
+    # Guard 0: verificar rede Wi-Fi
+    _check_wifi_network()
+
     # Guard 1: health probe + porta + PID (porta principal)
     ensure_safe_startup(SERVER_HOST, SERVER_PORT)
 
