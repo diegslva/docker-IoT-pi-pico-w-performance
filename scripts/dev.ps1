@@ -10,6 +10,7 @@ function Show-Help {
     Write-Host "Usage: scripts/dev.ps1 <command>" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "Commands:"
+    Write-Host "  flash     Install CircuitPython on Pico 2 W (BOOTSEL mode)"
     Write-Host "  deploy    Copy pico/code.py and settings.toml to CIRCUITPY drive"
     Write-Host "  firewall  Create Windows Firewall rule for server port"
     Write-Host "  up        Start monitoring stack (Prometheus + Grafana)"
@@ -198,8 +199,59 @@ function Set-Firewall {
     }
 }
 
+function Flash-Firmware {
+    <#
+    .SYNOPSIS
+    Instala CircuitPython nos Pico 2 W via bootloader UF2.
+    Detecta todas as drives RPI-RP2 (modo BOOTSEL) e copia o firmware.
+    #>
+
+    $uf2Path = "firmware\circuitpython-pico2w-10.1.4.uf2"
+    if (-not (Test-Path $uf2Path)) {
+        Write-Host "ERROR: Firmware not found at $uf2Path" -ForegroundColor Red
+        Write-Host "Run: curl -L -o firmware/circuitpython-pico2w-10.1.4.uf2 https://downloads.circuitpython.org/bin/raspberry_pi_pico2_w/en_US/adafruit-circuitpython-raspberry_pi_pico2_w-en_US-10.1.4.uf2" -ForegroundColor Yellow
+        exit 1
+    }
+
+    $drives = @(Get-Volume | Where-Object { $_.FileSystemLabel -eq "RP2350" -or $_.FileSystemLabel -eq "RPI-RP2" })
+    if ($drives.Count -eq 0) {
+        Write-Host ""
+        Write-Host "No Pico 2 W in BOOTSEL mode detected." -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "To enter BOOTSEL mode:" -ForegroundColor Cyan
+        Write-Host "  1. Hold the BOOTSEL button on the Pico 2 W" -ForegroundColor Cyan
+        Write-Host "  2. While holding, plug the USB cable" -ForegroundColor Cyan
+        Write-Host "  3. Release the button after plugging in" -ForegroundColor Cyan
+        Write-Host "  4. A drive named RPI-RP2 or RP2350 should appear" -ForegroundColor Cyan
+        Write-Host "  5. Run 'make flash' again" -ForegroundColor Cyan
+        Write-Host ""
+        exit 1
+    }
+
+    Write-Host ""
+    Write-Host "Flashing CircuitPython 10.1.4 to $($drives.Count) Pico 2 W(s)..." -ForegroundColor Yellow
+    Write-Host ""
+
+    $count = 0
+    foreach ($drive in $drives) {
+        $driveLetter = $drive.DriveLetter
+        $dest = "${driveLetter}:\"
+        $count++
+
+        Write-Host "[$count/$($drives.Count)] Flashing to $dest..." -ForegroundColor Yellow
+        Copy-Item $uf2Path "${dest}" -Force
+        Write-Host "  CircuitPython copied -- Pico will reboot as CIRCUITPY" -ForegroundColor Green
+    }
+
+    Write-Host ""
+    Write-Host "Flash complete: $count Pico 2 W(s) flashed." -ForegroundColor Green
+    Write-Host "Wait 5 seconds for reboot, then run 'make deploy'" -ForegroundColor Cyan
+    Write-Host ""
+}
+
 switch ($Command) {
     "deploy"    { Deploy-Pico }
+    "flash"     { Flash-Firmware }
     "firewall"  { Set-Firewall }
     "up"        { Start-Monitoring }
     "down"      { Stop-Monitoring }
