@@ -47,20 +47,35 @@ mac_bytes = wifi.radio.mac_address
 DEVICE_ID = ":".join(f"{b:02x}" for b in mac_bytes)
 
 # --- DVI Framebuffer ---
-# Pinout do Pimoroni Pico DV Demo Base:
-# CLK+/- = GP14/GP15, D0+/- = GP16/GP17, D1+/- = GP18/GP19, D2+/- = GP20/GP21
-# Usa GPIO numbers (funciona com qualquer build CircuitPython: generico ou Pimoroni)
+# Suporta dois boards via env var DVI_BOARD:
+#   "pico_dv"    -> Pimoroni Pico DV (PIO, so RP2040): CLK=14/15, D0=16/17, D1=18/19, D2=20/21
+#   "hstx"       -> Adafruit PiCowBell HSTX (HSTX, RP2350): CLK=14/15, D0=12/13, D1=18/19, D2=16/17
+# Default: "hstx" (novo padrao pra Pico 2 W)
 displayio.release_displays()
 
-# Detectar pin names: Pico DV build tem CKP, generico tem GP14
-_CKP = getattr(board, "CKP", board.GP14)
-_CKN = getattr(board, "CKN", board.GP15)
-_D0P = getattr(board, "D0P", board.GP16)
-_D0N = getattr(board, "D0N", board.GP17)
-_D1P = getattr(board, "D1P", board.GP18)
-_D1N = getattr(board, "D1N", board.GP19)
-_D2P = getattr(board, "D2P", board.GP20)
-_D2N = getattr(board, "D2N", board.GP21)
+DVI_BOARD = os.getenv("DVI_BOARD", "hstx")
+
+if DVI_BOARD == "pico_dv":
+    _CKP = getattr(board, "CKP", board.GP14)
+    _CKN = getattr(board, "CKN", board.GP15)
+    _D0P = getattr(board, "D0P", board.GP16)
+    _D0N = getattr(board, "D0N", board.GP17)
+    _D1P = getattr(board, "D1P", board.GP18)
+    _D1N = getattr(board, "D1N", board.GP19)
+    _D2P = getattr(board, "D2P", board.GP20)
+    _D2N = getattr(board, "D2N", board.GP21)
+else:
+    # PiCowBell HSTX (padrao)
+    _CKP = board.GP14
+    _CKN = board.GP15
+    _D0P = board.GP12  # Red+
+    _D0N = board.GP13  # Red-
+    _D1P = board.GP18  # Green+
+    _D1N = board.GP19  # Green-
+    _D2P = board.GP16  # Blue+
+    _D2N = board.GP17  # Blue-
+
+print("DVI board:", DVI_BOARD)
 
 fb = picodvi.Framebuffer(
     320, 240,

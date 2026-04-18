@@ -148,6 +148,7 @@ DEVICE_NAME = "$deviceName"
 DEVICE_POSITION = "auto"
 COLOR_DEPTH = "8"
 STREAM_PORT = "8001"
+DVI_BOARD = "hstx"
 "@
         Set-Content -Path "${dest}settings.toml" -Value $settingsContent -NoNewline
         Write-Host "  settings.toml generated" -ForegroundColor Green
