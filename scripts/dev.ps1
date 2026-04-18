@@ -245,7 +245,28 @@ function Flash-Firmware {
 
     Write-Host ""
     Write-Host "Flash complete: $count Pico 2 W(s) flashed." -ForegroundColor Green
-    Write-Host "Wait 5 seconds for reboot, then run 'make deploy'" -ForegroundColor Cyan
+    Write-Host "Waiting for CIRCUITPY drive(s) to appear..." -ForegroundColor Cyan
+
+    # Health check: espera drive CIRCUITPY aparecer (timeout 30s)
+    $timeout = 30
+    $elapsed = 0
+    $interval = 1
+    while ($elapsed -lt $timeout) {
+        Start-Sleep -Seconds $interval
+        $elapsed += $interval
+        $circuitpy = @(Get-Volume | Where-Object { $_.FileSystemLabel -eq "CIRCUITPY" })
+        if ($circuitpy.Count -ge $count) {
+            Write-Host "  Ready! $($circuitpy.Count) CIRCUITPY drive(s) detected after ${elapsed}s" -ForegroundColor Green
+            Write-Host ""
+            return
+        }
+        Write-Host "  Waiting... ($elapsed/${timeout}s, $($circuitpy.Count)/$count ready)" -ForegroundColor Gray
+    }
+
+    Write-Host ""
+    Write-Host "WARNING: Timeout waiting for CIRCUITPY after ${timeout}s." -ForegroundColor Yellow
+    Write-Host "The Pico may still be rebooting. Try 'make deploy' manually." -ForegroundColor Yellow
+    Write-Host ""
     Write-Host ""
 }
 
