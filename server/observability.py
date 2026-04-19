@@ -337,6 +337,12 @@ stream_fps = Gauge(
     labels=["device_id"],
 )
 
+stream_disconnects_total = Counter(
+    "stream_disconnects_total",
+    "Total stream disconnects by reason",
+    labels=["reason", "device_id"],
+)
+
 _ALL_METRICS: list[Counter | Gauge | Histogram] = [
     http_request_duration,
     http_requests_total,
@@ -352,6 +358,7 @@ _ALL_METRICS: list[Counter | Gauge | Histogram] = [
     stream_connections_active,
     stream_frames_pushed_total,
     stream_fps,
+    stream_disconnects_total,
 ]
 
 

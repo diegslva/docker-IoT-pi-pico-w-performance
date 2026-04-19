@@ -23,6 +23,7 @@ from server.observability import (
     frame_render_duration,
     frames_rendered_total,
     stream_connections_active,
+    stream_disconnects_total,
     stream_fps,
     stream_frames_pushed_total,
 )
@@ -129,11 +130,13 @@ async def _handle_client(
         await writer.drain()
 
         logger.info(
-            "Stream connected: %s (%s) pos=%d from %s",
+            "Stream connected: %s (%s) pos=%d from %s | handshake: frame_size=%d (%s)",
             name,
             device_id,
             assigned_pos,
             addr,
+            FRAME_SIZE,
+            "RGB565" if FRAME_SIZE == 153600 else "RGB332",
         )
         stream_connections_active.inc()
 
@@ -189,12 +192,30 @@ async def _handle_client(
 
             await asyncio.sleep(target_interval)
 
-    except ConnectionResetError, BrokenPipeError, asyncio.IncompleteReadError:
-        logger.info("Stream disconnected: %s (%s)", device_id, addr)
+    except (ConnectionResetError, BrokenPipeError, asyncio.IncompleteReadError) as e:
+        bytes_sent: int = frame_count * FRAME_SIZE
+        stream_disconnects_total.inc(reason="client_closed", device_id=device_id)
+        logger.info(
+            "Stream client closed: %s (%s) | %d frames sent (%d bytes) | reason: %s",
+            device_id,
+            addr,
+            frame_count,
+            bytes_sent,
+            type(e).__name__,
+        )
     except TimeoutError:
+        stream_disconnects_total.inc(reason="handshake_timeout", device_id=device_id)
         logger.warning("Handshake timeout from %s", addr)
-    except Exception:
-        logger.exception("Stream error for %s (%s)", device_id, addr)
+    except Exception as e:
+        stream_disconnects_total.inc(reason="error", device_id=device_id)
+        logger.exception(
+            "Stream error: %s (%s) | %d frames sent | %s: %s",
+            device_id,
+            addr,
+            frame_count,
+            type(e).__name__,
+            e,
+        )
     finally:
         stream_connections_active.inc(-1)
         writer.close()
