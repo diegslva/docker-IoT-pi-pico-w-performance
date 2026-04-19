@@ -13,6 +13,10 @@ flash: ## Instala CircuitPython no Pico 2 W (BOOTSEL mode)
 deploy: ## Copia codigo para o Pico W (CIRCUITPY drive)
 	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev.ps1 deploy
 
+all: flash deploy dev ## Pipeline completo: flash CircuitPython + deploy code + start server
+
+setup: flash deploy ## Setup inicial sem subir servidor (flash + deploy)
+
 ## --- Qualidade ---
 
 lint: ## Roda ruff linter
@@ -60,4 +64,4 @@ firewall: ## Cria regra de firewall para o servidor
 help: ## Mostra esta ajuda
 	@powershell -NoProfile -Command "Get-Content Makefile | Select-String '^\w+:.*##' | ForEach-Object { $$line = $$_.Line; $$parts = $$line -split '##'; $$cmd = ($$parts[0] -replace ':.*','').Trim(); $$desc = $$parts[1].Trim(); Write-Host ('  {0,-16} {1}' -f $$cmd, $$desc) }"
 
-.PHONY: dev flash deploy lint lint-fix format format-check test check up down restart nuke ps logs firewall help
+.PHONY: dev flash deploy all setup lint lint-fix format format-check test check up down restart nuke ps logs firewall help
