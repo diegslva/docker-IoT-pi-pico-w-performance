@@ -231,6 +231,13 @@ def stream_frames() -> int:
         assigned_pos = resp.get("position", 0)
         print("Stream connected | pos:", assigned_pos, "| frame:", frame_size)
 
+        # Validacao critica: frame_size do servidor deve casar com framebuffer local
+        if frame_size != FRAME_SIZE:
+            print("MISMATCH! Server frame_size=", frame_size, "Local FRAME_SIZE=", FRAME_SIZE)
+            print("Server COLOR_MODE != Pico COLOR_DEPTH. Sincronize as configs.")
+            print("Servidor enviando", frame_size, "bytes mas framebuffer espera", FRAME_SIZE)
+            return frames
+
         # Atualizar posicao se em modo auto
         if AUTO_MODE:
             DEVICE_POSITION = str(assigned_pos)
