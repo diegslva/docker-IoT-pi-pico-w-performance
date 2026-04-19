@@ -1,7 +1,8 @@
 """Conversao de imagens para formato RGB565 (16-bit) via NumPy.
 
 RGB565: 5 bits red (bits 15-11) + 6 bits green (bits 10-5) + 5 bits blue (bits 4-0)
-Total: 65.536 cores. Big-endian (MSB first) para compatibilidade com picodvi.
+Total: 65.536 cores. Little-endian (LSB first) — formato esperado pelo picodvi
+do CircuitPython.
 """
 
 import logging
@@ -30,5 +31,5 @@ def image_to_rgb565(
     g: np.ndarray = (arr[:, :, 1] >> 2) << 5  # 6 bits green
     b: np.ndarray = arr[:, :, 2] >> 3  # 5 bits blue
 
-    rgb565: np.ndarray = (r | g | b).astype(">u2")  # big-endian uint16
+    rgb565: np.ndarray = (r | g | b).astype("<u2")  # little-endian uint16 (picodvi)
     return rgb565.tobytes()
