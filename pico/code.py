@@ -86,7 +86,10 @@ fb = picodvi.Framebuffer(
     color_depth=COLOR_DEPTH,
 )
 
-fbuf = memoryview(fb)
+# Cast pra 'B' (byte): com color_depth=16 o framebuffer e uint16 (itemsize=2),
+# mas precisamos indexar por byte pra que recv_into e slice assignment funcionem
+# corretamente em RGB565 (153600 bytes) e RGB332 (76800 bytes) sem confusao.
+fbuf = memoryview(fb).cast("B")
 pool = socketpool.SocketPool(wifi.radio)
 gc.collect()
 
