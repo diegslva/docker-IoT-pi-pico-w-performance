@@ -204,15 +204,26 @@ function Flash-Firmware {
     <#
     .SYNOPSIS
     Instala CircuitPython nos Pico 2 W via bootloader UF2.
-    Detecta todas as drives RPI-RP2 (modo BOOTSEL) e copia o firmware.
+    Versao default: 10.1.4. Pra usar outra: setar env CP_VERSION (ex: "9.2.1").
     #>
 
-    $uf2Path = "firmware\circuitpython-pico2w-10.1.4.uf2"
+    $cpVersion = if ($env:CP_VERSION) { $env:CP_VERSION } else { "10.1.4" }
+    $uf2Path = "firmware\circuitpython-pico2w-$cpVersion.uf2"
+
     if (-not (Test-Path $uf2Path)) {
-        Write-Host "ERROR: Firmware not found at $uf2Path" -ForegroundColor Red
-        Write-Host "Run: curl -L -o firmware/circuitpython-pico2w-10.1.4.uf2 https://downloads.circuitpython.org/bin/raspberry_pi_pico2_w/en_US/adafruit-circuitpython-raspberry_pi_pico2_w-en_US-10.1.4.uf2" -ForegroundColor Yellow
-        exit 1
+        Write-Host "Firmware not found at $uf2Path" -ForegroundColor Yellow
+        Write-Host "Downloading CircuitPython $cpVersion..." -ForegroundColor Yellow
+        $url = "https://downloads.circuitpython.org/bin/raspberry_pi_pico2_w/en_US/adafruit-circuitpython-raspberry_pi_pico2_w-en_US-$cpVersion.uf2"
+        try {
+            Invoke-WebRequest -Uri $url -OutFile $uf2Path -UseBasicParsing
+            Write-Host "Downloaded: $uf2Path" -ForegroundColor Green
+        } catch {
+            Write-Host "ERROR: Failed to download $url" -ForegroundColor Red
+            exit 1
+        }
     }
+
+    Write-Host "Using CircuitPython version: $cpVersion" -ForegroundColor Cyan
 
     $drives = @(Get-Volume | Where-Object { $_.FileSystemLabel -eq "RP2350" -or $_.FileSystemLabel -eq "RPI-RP2" })
     if ($drives.Count -eq 0) {
@@ -230,7 +241,7 @@ function Flash-Firmware {
     }
 
     Write-Host ""
-    Write-Host "Flashing CircuitPython 10.1.4 to $($drives.Count) Pico 2 W(s)..." -ForegroundColor Yellow
+    Write-Host "Flashing CircuitPython $cpVersion to $($drives.Count) Pico 2 W(s)..." -ForegroundColor Yellow
     Write-Host ""
 
     $count = 0

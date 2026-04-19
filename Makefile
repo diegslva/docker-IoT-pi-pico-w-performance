@@ -7,8 +7,11 @@ dev: ## Roda servidor FastAPI (verifica porta, mata processo anterior se necessa
 
 ## --- Pico W ---
 
-flash: ## Instala CircuitPython no Pico 2 W (BOOTSEL mode)
+flash: ## Instala CircuitPython 10.1.4 no Pico 2 W (BOOTSEL mode)
 	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev.ps1 flash
+
+flash-9: ## Instala CircuitPython 9.2.1 no Pico 2 W (teste de regressao HSTX)
+	powershell -NoProfile -ExecutionPolicy Bypass -Command "$$env:CP_VERSION='9.2.1'; & scripts/dev.ps1 flash"
 
 deploy: ## Copia codigo para o Pico W (CIRCUITPY drive)
 	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev.ps1 deploy
@@ -67,4 +70,4 @@ firewall: ## Cria regra de firewall para o servidor
 help: ## Mostra esta ajuda
 	@powershell -NoProfile -Command "Get-Content Makefile | Select-String '^\w+:.*##' | ForEach-Object { $$line = $$_.Line; $$parts = $$line -split '##'; $$cmd = ($$parts[0] -replace ':.*','').Trim(); $$desc = $$parts[1].Trim(); Write-Host ('  {0,-16} {1}' -f $$cmd, $$desc) }"
 
-.PHONY: dev flash deploy test-dvi all setup lint lint-fix format format-check test check up down restart nuke ps logs firewall help
+.PHONY: dev flash flash-9 deploy test-dvi all setup lint lint-fix format format-check test check up down restart nuke ps logs firewall help
