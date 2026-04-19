@@ -13,6 +13,9 @@ flash: ## Instala CircuitPython no Pico 2 W (BOOTSEL mode)
 deploy: ## Copia codigo para o Pico W (CIRCUITPY drive)
 	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev.ps1 deploy
 
+test-dvi: ## Deploya teste minimo do PiCowBell HSTX (listras coloridas, sem rede)
+	powershell -NoProfile -Command "Get-Volume | Where-Object { $$_.FileSystemLabel -eq 'CIRCUITPY' } | ForEach-Object { Copy-Item pico\test_dvi.py ($$_.DriveLetter + ':\code.py') -Force; Write-Host ('Test DVI deployed to ' + $$_.DriveLetter + ':') -ForegroundColor Green }"
+
 all: flash deploy dev ## Pipeline completo: flash CircuitPython + deploy code + start server
 
 setup: flash deploy ## Setup inicial sem subir servidor (flash + deploy)
@@ -64,4 +67,4 @@ firewall: ## Cria regra de firewall para o servidor
 help: ## Mostra esta ajuda
 	@powershell -NoProfile -Command "Get-Content Makefile | Select-String '^\w+:.*##' | ForEach-Object { $$line = $$_.Line; $$parts = $$line -split '##'; $$cmd = ($$parts[0] -replace ':.*','').Trim(); $$desc = $$parts[1].Trim(); Write-Host ('  {0,-16} {1}' -f $$cmd, $$desc) }"
 
-.PHONY: dev flash deploy all setup lint lint-fix format format-check test check up down restart nuke ps logs firewall help
+.PHONY: dev flash deploy test-dvi all setup lint lint-fix format format-check test check up down restart nuke ps logs firewall help
