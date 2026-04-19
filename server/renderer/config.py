@@ -8,6 +8,11 @@ Todos os scenes/effects importam daqui: uma unica variavel muda o formato inteir
 import os
 from collections.abc import Callable
 
+from dotenv import load_dotenv
+
+# Carrega .env antes de ler env vars (funciona em qualquer subprocess)
+load_dotenv()
+
 COLOR_MODE: str = os.getenv("COLOR_MODE", "rgb332")
 
 if COLOR_MODE == "rgb332":
